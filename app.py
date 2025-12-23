@@ -51,39 +51,40 @@ def compute_consequences(decision):
     }
 
 def derive_assumptions(c):
-    assumptions = []
+    a = []
     if c["Volatility Sensitivity"] in ["High", "Very High"]:
-        assumptions.append("Market volatility must remain stable.")
+        a.append("Market volatility must remain stable.")
     if c["Correlation Fragility"] == "High":
-        assumptions.append("Asset correlations must not converge.")
+        a.append("Asset correlations must not converge.")
     if c["Regime Dependence"] in ["High", "Very High"]:
-        assumptions.append("The current market regime must persist.")
+        a.append("The current market regime must persist.")
     if c["Concentration Risk"] == "High":
-        assumptions.append("This position must perform with little margin for error.")
-    return assumptions
+        a.append("This position must perform with little margin for error.")
+    return a
 
 # ================= UI =================
 st.title("GLOQONT")
 
 # ================= ABORT FLOW =================
 if st.session_state.decision_aborted:
-    st.error("Decision aborted. No analysis shown.")
+    st.error("Decision aborted. No further analysis shown.")
     if st.button("Start a new decision"):
         st.session_state.clear()
-        st.rerun()
     st.stop()
 
 # ================= DECISION GATE =================
 if not st.session_state.decision_committed:
 
-    st.markdown("""
-    ### Before capital moves, stop.
+    st.markdown(
+        """
+        ### Before capital moves, stop.
 
-    Most investors lose money **not because of bad ideas**,  
-    but because they **don’t see consequences before acting**.
+        Most investors don’t lose money because of bad ideas —  
+        they lose money because **they act without seeing downside first**.
 
-    GLOQONT forces that moment.
-    """)
+        GLOQONT forces that pause.
+        """
+    )
 
     st.markdown("## What are you about to do?")
 
@@ -129,17 +130,47 @@ if not st.session_state.decision_committed:
             "leverage": leverage,
         }
 
-        st.markdown("## What breaks if this goes wrong?")
+        st.markdown("## What gets worse because of this decision")
 
         consequences = compute_consequences(st.session_state.decision)
         for k, v in consequences.items():
             st.write(f"**{k}**: {v}")
 
+        st.markdown("## If You Do Nothing vs If You Act")
+
+        left, right = st.columns(2)
+
+        with left:
+            st.markdown("### 🟥 If You Do Nothing")
+            st.markdown(
+                """
+                - Portfolio remains unchanged  
+                - No new concentration introduced  
+                - No additional regime dependence  
+                - No new assumptions required  
+                """
+            )
+
+        with right:
+            st.markdown("### 🟩 If You Act")
+            st.markdown(
+                f"""
+                - +{st.session_state.decision['magnitude']}% exposure to **{st.session_state.decision['asset']}**  
+                - Increases concentration risk — losses are harder to recover  
+                - Becomes more fragile during risk-off regimes  
+                - Failure of assumptions directly amplifies downside  
+                """
+            )
+
         st.markdown(
-            "_These are not predictions. They are fragilities this decision introduces._"
+            f"""
+            ⚠️ **Downside Summary:**  
+            Acting increases your exposure to **{st.session_state.decision['asset']}**.
+            If conditions change, losses accelerate faster than doing nothing.
+            """
         )
 
-        st.markdown("## What must stay true for this to work?")
+        st.markdown("## What must stay true for this to work")
 
         assumptions = derive_assumptions(consequences)
         for a in assumptions:
@@ -175,54 +206,32 @@ if not st.session_state.decision_committed:
 
 # ================= POST-DECISION =================
 if st.session_state.decision is None:
-    st.error("No decision found. Please restart.")
-    if st.button("Start new decision"):
+    st.error("No decision found. Please start again.")
+    if st.button("Restart"):
         st.session_state.clear()
-        st.rerun()
     st.stop()
 
 st.success("Decision committed. Intelligence unlocked.")
 
 st.markdown("## What Changed Because of This Decision")
 
-st.write(f"""
-**Decision:** {st.session_state.decision['intent']}  
-**Asset:** {st.session_state.decision['asset']}  
-**Magnitude:** {st.session_state.decision['magnitude']}%  
-**Horizon:** {st.session_state.decision['horizon']}
-""")
+st.write(
+    f"""
+    **Decision:** {st.session_state.decision['intent']}  
+    **Asset:** {st.session_state.decision['asset']}  
+    **Magnitude:** {st.session_state.decision['magnitude']}%  
+    **Horizon:** {st.session_state.decision['horizon']}
+    """
+)
 
-# ================= DO NOTHING vs ACT =================
-st.markdown("## If You Do Nothing vs If You Act")
+st.info(
+    "All analytics, dashboards, and simulations now run **only in the context of this decision**."
+)
 
-left, right = st.columns(2)
-
-with left:
-    st.markdown("### 🟥 If You Do Nothing")
-    st.markdown("""
-    - Portfolio remains unchanged  
-    - No new concentration introduced  
-    - No additional regime dependence  
-    - No new assumptions required  
-    """)
-
-with right:
-    st.markdown("### 🟩 If You Act")
-    st.markdown(f"""
-    - +{st.session_state.decision['magnitude']}% exposure to **{st.session_state.decision['asset']}**  
-    - Increases concentration risk  
-    - Increases regime sensitivity  
-    - Introduces fragile assumptions  
-    """)
-
-# ================= LEDGER =================
 st.markdown("## Decisions You Have Made (and Avoided)")
 
-ledger = load_ledger()
-if not ledger:
-    st.info("No decisions recorded yet.")
-else:
-    for d in reversed(ledger):
-        st.write(
-            f"- **{d['intent']} {d['asset']} ({d['magnitude']}%)** → {d['commitment']['action']}"
-        )
+for d in reversed(load_ledger()):
+    st.write(
+        f"- **{d['intent']} {d['asset']} ({d['magnitude']}%)** → {d['commitment']['action']}"
+    )
+
