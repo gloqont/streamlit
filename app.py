@@ -1,241 +1,240 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from uuid import uuid4
-from datetime import datetime
 import json
 import os
+from uuid import uuid4
+from datetime import datetime, timedelta
 
 # ================= CONFIG =================
-st.set_page_config(page_title="GLOQONT — Decision Intelligence", layout="centered")
+st.set_page_config(
+    page_title="GLOQONT — Decision Intelligence",
+    layout="centered"
+)
 
-LEDGER_FILE = "decision_ledger.json"
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
 
-# ================= SESSION STATE =================
-if "decision" not in st.session_state:
-    st.session_state.decision = None
-if "committed" not in st.session_state:
-    st.session_state.committed = False
-if "aborted" not in st.session_state:
-    st.session_state.aborted = False
+# ================= UTILITIES =================
+def now():
+    return datetime.utcnow().isoformat()
 
-# ================= LEDGER =================
-def load_ledger():
-    if not os.path.exists(LEDGER_FILE):
-        return []
-    with open(LEDGER_FILE, "r") as f:
-        return json.load(f)
+def user_file(user_id):
+    return os.path.join(DATA_DIR, f"{user_id}_ledger.json")
 
-def save_to_ledger(entry):
-    ledger = load_ledger()
-    ledger.append(entry)
-    with open(LEDGER_FILE, "w") as f:
-        json.dump(ledger, f, indent=2)
+def safe_get(d, k, default=None):
+    return d[k] if k in d else default
 
-# ================= CORE ENGINE =================
-def simulate_distribution(base_vol, magnitude, n=5000):
-    shock = magnitude / 100
-    returns = np.random.normal(0, base_vol * (1 + shock), n)
-    return np.percentile(returns, [5, 50, 95])
-
-def regime_matrix(base_risk, magnitude):
-    shock = magnitude / 100
-    return {
-        "Risk-On": (base_risk * 0.6, base_risk * 0.6 * (1 + shock)),
-        "Risk-Off": (base_risk * 1.2, base_risk * 1.2 * (1 + shock * 2)),
-        "Volatility Spike": (base_risk * 1.6, base_risk * 1.6 * (1 + shock * 3)),
-    }
-
-def compute_consequences(decision):
-    positions = decision["portfolio"]
-    magnitude = decision["magnitude"]
-
-    equity_weight = sum(p["weight"] for p in positions if p["class"] == "Equity")
-    base_vol = 0.012 + equity_weight / 2000
-
-    p5, p50, p95 = simulate_distribution(base_vol, magnitude)
-
-    attribution = {
-        "Target Asset": round(0.6 + magnitude / 200, 2),
-        "Correlation Increase": round(0.25, 2),
-        "Liquidity Reduction": round(0.15, 2),
-    }
-
-    regimes = regime_matrix(base_vol, magnitude)
-
-    return {
-        "distribution": {
-            "p5": p5,
-            "p50": p50,
-            "p95": p95,
-        },
-        "attribution": attribution,
-        "regimes": regimes,
-        "summary": {
-            "left_tail_multiplier": round(abs(p5) / base_vol, 2),
-            "recovery_days": int(15 + magnitude * 2),
-        }
-    }
-
-# ================= UI =================
+# ================= USER SYSTEM =================
 st.title("GLOQONT")
-st.caption("Decision → Consequence Intelligence")
+st.caption("Decision → Consequence → Memory")
 
-# ================= ABORTED =================
-if st.session_state.aborted:
-    st.error("Decision aborted. No capital committed.")
-    if st.button("Start new decision"):
-        st.session_state.clear()
+if "user_id" not in st.session_state:
+    st.session_state.user_id = None
+
+if not st.session_state.user_id:
+    st.markdown("### Identify yourself")
+    user = st.text_input("User ID / Email (demo-safe)", placeholder="investor@fund.com")
+    if st.button("Enter"):
+        st.session_state.user_id = user.strip().lower()
         st.rerun()
     st.stop()
 
-# ================= DECISION INPUT =================
-if not st.session_state.committed:
+USER_ID = st.session_state.user_id
 
-    st.markdown("""
-    ### Before capital moves, stop.
+# ================= LEDGER =================
+def load_ledger():
+    path = user_file(USER_ID)
+    if not os.path.exists(path):
+        return []
+    with open(path, "r") as f:
+        ledger = json.load(f)
 
-    GLOQONT does not predict markets.  
-    It exposes **what gets worse if you are wrong**.
-    """)
+    # --- schema hardening ---
+    for d in ledger:
+        d.setdefault("type", "Decision")
+        d.setdefault("outcome", "pending")
+        d.setdefault("realized_return", None)
+        d.setdefault("quality_score", None)
 
-    with st.form("decision_form"):
-        decision_type = st.selectbox(
-            "Decision Type",
-            ["Trade Decision", "Portfolio Action", "Macro Event", "Shock Scenario"]
-        )
+    return ledger
 
-        intent = st.text_input(
-            "Decision",
-            placeholder="e.g. Buy NVDA +5%, Reduce equities −10%, Fed hikes 50bps"
-        )
+def save_ledger(ledger):
+    with open(user_file(USER_ID), "w") as f:
+        json.dump(ledger, f, indent=2)
 
-        magnitude = st.slider("Impact magnitude (%)", 1, 50, 10)
-        horizon = st.selectbox("Time horizon", ["7 days", "30 days", "90 days"])
+def append_decision(d):
+    ledger = load_ledger()
+    ledger.append(d)
+    save_ledger(ledger)
 
-        submit = st.form_submit_button("Analyze Consequences")
+# ================= CORE ENGINE =================
+def simulate_distribution(vol, magnitude, n=5000):
+    shock = magnitude / 100
+    rets = np.random.normal(0, vol * (1 + shock), n)
+    return np.percentile(rets, [5, 50, 95])
 
-    if submit:
-        st.session_state.decision = {
-            "id": str(uuid4()),
-            "timestamp": datetime.utcnow().isoformat(),
-            "type": decision_type,
-            "intent": intent,
-            "magnitude": magnitude,
-            "horizon": horizon,
-        }
+def regime_matrix(vol, magnitude):
+    shock = magnitude / 100
+    return {
+        "Risk-On": (vol * 0.6, vol * 0.6 * (1 + shock)),
+        "Risk-Off": (vol * 1.2, vol * 1.2 * (1 + shock * 2)),
+        "Vol Spike": (vol * 1.6, vol * 1.6 * (1 + shock * 3)),
+    }
 
-    if st.session_state.decision:
+def score_decision(expected, realized):
+    if realized is None:
+        return None
+    error = abs(realized - expected)
+    if error < 0.01:
+        return 95
+    if error < 0.03:
+        return 80
+    if error < 0.06:
+        return 60
+    return 30
 
-        st.markdown("## Portfolio Context")
+# ================= DECISION CREATION =================
+st.markdown("## 1️⃣ Define the Decision")
 
-        portfolio = st.data_editor(
-            [
-                {"asset": "AAPL", "weight": 30.0, "class": "Equity"},
-                {"asset": "MSFT", "weight": 25.0, "class": "Equity"},
-                {"asset": "BTC", "weight": 15.0, "class": "Crypto"},
-                {"asset": "Cash", "weight": 30.0, "class": "Cash"},
-            ],
-            num_rows="dynamic",
-            use_container_width=True,
-        )
+with st.form("decision_form"):
+    d_type = st.selectbox(
+        "Decision Type",
+        ["Trade", "Portfolio Action", "Macro Event", "Shock Scenario"]
+    )
 
-        st.session_state.decision["portfolio"] = portfolio
+    intent = st.text_input(
+        "Decision",
+        placeholder="Buy NVDA +5%, Reduce equity −10%, Fed hikes 50bps"
+    )
 
-        # ================= CONSEQUENCES =================
-        c = compute_consequences(st.session_state.decision)
+    magnitude = st.slider("Impact magnitude (%)", 1, 50, 10)
+    horizon = st.selectbox("Horizon", ["7 days", "30 days", "90 days"])
 
-        st.markdown("## ⚠️ Decision Impact Summary")
+    submit = st.form_submit_button("Simulate Consequences")
 
-        st.error(
-            f"""
-            **If you act:**  
-            • Worst-case outcome worsens by **{c['summary']['left_tail_multiplier']}×**  
-            • Expected recovery time extends to **{c['summary']['recovery_days']} days**  
-            • Downside accelerates under regime stress
-            """
-        )
+if submit:
+    decision = {
+        "id": str(uuid4()),
+        "timestamp": now(),
+        "type": d_type,
+        "intent": intent,
+        "magnitude": magnitude,
+        "horizon": horizon,
+    }
 
-        st.markdown("## Outcome Distribution (30-day)")
+    # ===== Portfolio Context =====
+    portfolio = [
+        {"asset": "AAPL", "weight": 30, "class": "Equity"},
+        {"asset": "MSFT", "weight": 25, "class": "Equity"},
+        {"asset": "BTC", "weight": 15, "class": "Crypto"},
+        {"asset": "Cash", "weight": 30, "class": "Cash"},
+    ]
 
-        dist_df = pd.DataFrame({
-            "Scenario": ["5th percentile", "Median", "95th percentile"],
-            "Return (%)": [
-                round(c["distribution"]["p5"] * 100, 2),
-                round(c["distribution"]["p50"] * 100, 2),
-                round(c["distribution"]["p95"] * 100, 2),
-            ]
-        })
-        st.table(dist_df)
+    equity_weight = sum(p["weight"] for p in portfolio if p["class"] == "Equity")
+    base_vol = 0.012 + equity_weight / 2000
 
-        st.markdown("## What Drives the New Risk")
+    p5, p50, p95 = simulate_distribution(base_vol, magnitude)
+    regimes = regime_matrix(base_vol, magnitude)
 
-        attr_df = pd.DataFrame.from_dict(
-            c["attribution"], orient="index", columns=["Share of New Downside"]
-        )
-        st.bar_chart(attr_df)
+    decision["expected"] = {
+        "p5": p5,
+        "median": p50,
+        "p95": p95,
+        "regimes": regimes,
+    }
 
-        st.markdown("## Regime Sensitivity")
+    decision["summary"] = {
+        "left_tail_multiplier": round(abs(p5) / base_vol, 2),
+        "expected_return": round(p50 * 100, 2),
+        "recovery_days": int(15 + magnitude * 2),
+    }
 
-        regime_rows = []
-        for r, (base, shocked) in c["regimes"].items():
-            regime_rows.append([
-                r,
-                round(base * 100, 2),
-                round(shocked * 100, 2)
-            ])
+    decision["outcome"] = "committed"
+    append_decision(decision)
+    st.success("Decision recorded. Memory updated.")
 
-        regime_df = pd.DataFrame(
-            regime_rows,
-            columns=["Regime", "Do Nothing (%)", "If You Act (%)"]
-        )
-        st.table(regime_df)
+# ================= DECISION MEMORY =================
+st.markdown("## 2️⃣ Decision Memory")
 
-        st.markdown("## Final Choice")
+ledger = load_ledger()
 
-        weakest = st.selectbox(
-            "Weakest assumption",
-            ["Volatility remains contained", "Correlations remain stable", "Liquidity persists"]
-        )
-
-        choice = st.radio(
-            "Knowing this, what do you do?",
-            ["Proceed with decision", "Abort decision"]
-        )
-
-        if choice == "Abort decision":
-            st.session_state.aborted = True
-            st.session_state.decision["outcome"] = "aborted"
-            st.session_state.decision["weakest_assumption"] = weakest
-            save_to_ledger(st.session_state.decision)
-            st.rerun()
-
-        if choice == "Proceed with decision":
-            st.session_state.committed = True
-            st.session_state.decision["outcome"] = "committed"
-            st.session_state.decision["weakest_assumption"] = weakest
-            save_to_ledger(st.session_state.decision)
-            st.rerun()
-
+if not ledger:
+    st.info("No decisions yet.")
     st.stop()
 
-# ================= POST DECISION =================
-st.success("Decision committed. This outcome is now part of your decision history.")
+df = pd.DataFrame([
+    {
+        "Time": d["timestamp"][:19],
+        "Decision": d["intent"],
+        "Expected %": d["summary"]["expected_return"],
+        "Realized %": d["realized_return"],
+        "Quality": d["quality_score"],
+    }
+    for d in ledger
+])
 
-st.markdown("## Decision Record")
+st.dataframe(df, use_container_width=True)
 
-d = st.session_state.decision
-st.write(f"""
-**Type:** {d['type']}  
-**Decision:** {d['intent']}  
-**Magnitude:** {d['magnitude']}%  
-**Horizon:** {d['horizon']}  
-**Weakest Assumption:** {d['weakest_assumption']}
-""")
+# ================= OUTCOME UPDATE =================
+st.markdown("## 3️⃣ Record Realized Outcome")
 
-st.markdown("## Your Decision Ledger")
+pending = [d for d in ledger if d["realized_return"] is None]
 
-for d in reversed(load_ledger()):
-    st.write(
-        f"- **{d['type']}** — {d['intent']} → **{d['outcome']}**"
+if pending:
+    d_map = {d["id"]: d for d in pending}
+    sel = st.selectbox(
+        "Select decision",
+        options=list(d_map.keys()),
+        format_func=lambda x: d_map[x]["intent"]
     )
+
+    realized = st.number_input("Realized return (%)", -50.0, 50.0, 0.0)
+
+    if st.button("Update Outcome"):
+        d = d_map[sel]
+        d["realized_return"] = realized
+        d["quality_score"] = score_decision(
+            d["summary"]["expected_return"] / 100,
+            realized / 100
+        )
+        save_ledger(ledger)
+        st.success("Outcome recorded. Decision quality updated.")
+        st.rerun()
+else:
+    st.info("All decisions have realized outcomes.")
+
+# ================= INSIGHT =================
+st.markdown("## 4️⃣ Decision Quality Intelligence")
+
+scored = [d for d in ledger if d["quality_score"] is not None]
+
+if scored:
+    avg_quality = int(np.mean([d["quality_score"] for d in scored]))
+    st.metric("Average Decision Quality", f"{avg_quality}/100")
+
+    st.markdown(
+        """
+        **Interpretation**
+        - >80: Decisions are well-calibrated
+        - 60–80: Risk understood, timing noisy
+        - <60: Systematic misjudgment detected
+        """
+    )
+else:
+    st.info("No scored decisions yet.")
+
+# ================= FINAL MESSAGE =================
+st.markdown("---")
+st.markdown(
+    """
+    **GLOQONT is not a prediction tool.**
+
+    It is a **decision memory system** that:
+    - Exposes downside before action
+    - Records intent, assumptions, and outcomes
+    - Learns where judgment breaks
+
+    This is how capital allocation becomes accountable.
+    """
+)
