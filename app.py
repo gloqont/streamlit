@@ -1,198 +1,196 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from uuid import uuid4
+import yfinance as yf
+import json
+import os
 from datetime import datetime
+from uuid import uuid4
 
 # ================= CONFIG =================
-st.set_page_config(page_title="GLOQONT — Decision Consequences", layout="centered")
+st.set_page_config(page_title="GLOQONT", layout="centered")
 
-# ================= HELPERS =================
+DATA_DIR = "data"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# ================= UTIL =================
 def now():
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-# ================= CORE CONSEQUENCE ENGINE =================
-def consequence_engine(decision_type, decision_text, magnitude):
-    """
-    Consequences scale based on:
-    - decision type
-    - magnitude
-    - whether decision sounds concentrated, macro, or risky
-    """
+def user_file(uid):
+    return os.path.join(DATA_DIR, f"{uid}.json")
 
-    text = decision_text.lower()
+def safe_get(d, k, default=None):
+    return d[k] if k in d else default
 
-    concentration_boost = 1.4 if any(x in text for x in ["nvda", "single", "one", "all in"]) else 1.0
-    macro_boost = 1.6 if decision_type in ["Macro Event", "Shock Scenario"] else 1.0
-    size_boost = 1 + magnitude / 20
+# ================= USER =================
+st.title("GLOQONT")
+st.caption("Decision → Consequence → Memory")
 
-    risk_multiplier = concentration_boost * macro_boost * size_boost
+if "uid" not in st.session_state:
+    st.session_state.uid = None
 
-    base_vol = 1.2  # %
-    p5 = -base_vol * risk_multiplier * 2.2
-    p50 = base_vol * (1 / risk_multiplier)
-    p95 = base_vol * risk_multiplier * 1.3
+if not st.session_state.uid:
+    uid = st.text_input("User ID / Email (demo-safe)")
+    if st.button("Enter"):
+        st.session_state.uid = uid.lower().strip()
+        st.rerun()
+    st.stop()
 
-    drawdown = abs(p5) * 1.4
+UID = st.session_state.uid
 
-    attribution = {
-        "Target asset exposure": round(55 * concentration_boost, 1),
-        "Correlation increase": round(30 * macro_boost, 1),
-        "Liquidity loss": round(15 * size_boost, 1),
-    }
+# ================= LEDGER =================
+def load_ledger():
+    path = user_file(UID)
+    if not os.path.exists(path):
+        return []
+    with open(path, "r") as f:
+        return json.load(f)
 
-    regime = {
-        "Risk-On": {"do_nothing": 0.8, "act": p95},
-        "Risk-Off": {"do_nothing": -1.1, "act": p5},
-    }
+def save_ledger(ledger):
+    with open(user_file(UID), "w") as f:
+        json.dump(ledger, f, indent=2)
 
-    liquidity_flag = "⚠️ Harder to exit quickly" if magnitude > 10 else "✓ Liquidity stable"
+# ================= MARKET DATA =================
+def get_market_volatility():
+    try:
+        vix = yf.download("^VIX", period="5d", interval="1d", progress=False)
+        return float(vix["Close"].iloc[-1]) / 100
+    except Exception:
+        return 0.18  # fallback
 
-    kid_explanation = (
-        f"If things go bad, you lose money **faster than before**.\n\n"
-        f"Before, falling hurt a little.\n"
-        f"After this decision, falling hurts **a lot more**."
+# ================= ENGINE =================
+def consequence_engine(mode, text, magnitude, market_vol):
+    concentration = 1.4 if any(x in text.lower() for x in ["nvda", "all", "single"]) else 1
+    size = 1 + magnitude / 20
+    vol_boost = 1 + market_vol
+
+    risk = concentration * size * vol_boost
+
+    worst = -risk * 2.5
+    typical = 1 / risk
+    best = risk * 1.2
+
+    if mode == "Trader Mode":
+        break_time = max(3, int(45 / risk))
+        irreversible = max(1, int(break_time / 3))
+        unit = "minutes"
+    else:
+        break_time = max(5, int(60 / risk))
+        irreversible = max(2, int(break_time / 2))
+        unit = "days"
+
+    auto_block = (
+        risk > 3.5 or break_time <= 5 or market_vol > 0.3
     )
 
     return {
-        "distribution": (p5, p50, p95),
-        "drawdown": drawdown,
-        "attribution": attribution,
-        "regime": regime,
-        "liquidity": liquidity_flag,
-        "kid": kid_explanation,
-        "multiplier": round(abs(p5) / base_vol, 1),
+        "distribution": (worst, typical, best),
+        "multiplier": round(abs(worst), 1),
+        "break_time": break_time,
+        "irreversible": irreversible,
+        "unit": unit,
+        "auto_block": auto_block,
+        "market_vol": round(market_vol * 100, 1),
     }
 
-# ================= UI =================
-st.title("GLOQONT")
-st.caption("What happens to your money if you do this?")
-
+# ================= LANDING =================
 st.markdown("""
-Before money moves, GLOQONT shows **what gets worse**.
-Not predictions. **Consequences.**
+### For Traders  
+You lose when things break **faster than you can react**.
+
+### For Investors  
+You lose when bad years become **unrecoverable**.
+
+**GLOQONT shows both — before you act.**
 """)
 
-# ================= DECISION INPUT =================
-with st.form("decision"):
-    decision_type = st.selectbox(
-        "Decision Type",
-        ["Trade Decision", "Portfolio Action", "Macro Event", "Shock Scenario"]
-    )
+mode = st.radio("Mode", ["Trader Mode", "Investor Mode"], horizontal=True)
 
+# ================= DECISION =================
+with st.form("decision"):
     decision_text = st.text_input(
         "What are you about to do?",
-        placeholder="Buy NVDA +5%, Reduce equities −10%, Fed hikes 50bps"
+        placeholder="Buy NVDA +5%, Short BTC, Reduce equity −10%"
+    )
+    magnitude = st.slider("Decision size (%)", 1, 30, 5)
+    submit = st.form_submit_button("Analyze")
+
+# ================= ANALYSIS =================
+if submit and decision_text:
+    market_vol = get_market_volatility()
+    c = consequence_engine(mode, decision_text, magnitude, market_vol)
+
+    st.markdown("## 🔴 Consequence Summary")
+
+    if c["auto_block"]:
+        st.error("🚫 DO NOT TRADE THIS — downside accelerates faster than control")
+    else:
+        st.warning("⚠️ High risk — proceed only with strict controls")
+
+    st.metric("Market stress (live)", f"{c['market_vol']}%")
+
+    st.markdown("### 📊 Outcome Distribution")
+    st.table(pd.DataFrame({
+        "Scenario": ["Worst", "Typical", "Best"],
+        "Impact (%)": c["distribution"]
+    }))
+
+    st.markdown("### ⏱️ How fast things break")
+    st.metric("Damage accelerates in", f"{c['break_time']} {c['unit']}")
+
+    st.markdown("### 🧨 Time to irreversible damage")
+    st.progress(c["irreversible"] / c["break_time"])
+    st.caption(
+        f"After ~{c['irreversible']} {c['unit']}, exits no longer prevent major loss."
     )
 
-    magnitude = st.slider("How big is this decision (%)", 1, 30, 5)
+    decision = {
+        "id": str(uuid4()),
+        "time": now(),
+        "mode": mode,
+        "text": decision_text,
+        "magnitude": magnitude,
+        "analysis": c,
+    }
 
-    submitted = st.form_submit_button("Show Consequences")
+    ledger = load_ledger()
+    ledger.append(decision)
+    save_ledger(ledger)
 
-# ================= CONSEQUENCE OUTPUT =================
-if submitted and decision_text.strip():
+# ================= REPLAY =================
+st.markdown("## 🔁 Replay Past Decisions")
 
-    c = consequence_engine(decision_type, decision_text, magnitude)
+ledger = load_ledger()
 
-    st.markdown("## 🔴 What this decision does to your portfolio")
-
-    st.error(
-        f"""
-        **Big picture:**  
-        This decision makes bad outcomes **{c['multiplier']}× worse** when markets turn against you.
-        """
+if ledger:
+    ids = {d["id"]: d for d in ledger}
+    sel = st.selectbox(
+        "Select decision",
+        options=list(ids.keys()),
+        format_func=lambda x: ids[x]["text"]
     )
 
-    # -------- P&L DISTRIBUTION --------
-    st.markdown("### 📊 Portfolio Outcomes (Next 30 Days)")
+    d = ids[sel]
+    st.markdown(f"**Decision:** {d['text']}")
+    st.markdown(f"**When:** {d['time']}")
+    st.markdown(f"**Mode:** {d['mode']}")
 
-    dist_df = pd.DataFrame({
-        "Scenario": ["Worst case", "Typical", "Best case"],
-        "Portfolio change (%)": [
-            round(c["distribution"][0], 2),
-            round(c["distribution"][1], 2),
-            round(c["distribution"][2], 2),
-        ]
-    })
+    st.markdown("### Consequences at the time")
+    st.json(d["analysis"])
+else:
+    st.info("No past decisions yet.")
 
-    st.table(dist_df)
+# ================= FOOTER =================
+st.markdown("""
+---
+**GLOQONT is not a trading tool.  
+It is a decision-integrity system.**
 
-    # -------- WORST CASE --------
-    st.markdown("### 💥 Worst-Case Damage")
+It shows:
+- how bad things get  
+- how fast they break  
+- when mistakes become permanent  
 
-    st.warning(
-        f"""
-        If things go wrong, your portfolio can fall **{round(c['drawdown'],2)}%**
-        before you can recover.
-        """
-    )
-
-    # -------- ATTRIBUTION --------
-    st.markdown("### 🧩 What causes the damage")
-
-    attr_df = pd.DataFrame.from_dict(
-        c["attribution"], orient="index", columns=["% of total downside"]
-    )
-
-    st.bar_chart(attr_df)
-
-    # -------- CORRELATION --------
-    st.markdown("### 🔗 Correlation Breakage")
-
-    st.info(
-        """
-        Assets that usually move separately now **fall together**.
-        Diversification protects you less when you need it most.
-        """
-    )
-
-    # -------- LIQUIDITY --------
-    st.markdown("### 💧 Liquidity Stress")
-
-    st.write(c["liquidity"])
-
-    # -------- REGIME --------
-    st.markdown("### 🌧️ What happens in different markets")
-
-    regime_df = pd.DataFrame([
-        ["Markets calm", c["regime"]["Risk-On"]["do_nothing"], c["regime"]["Risk-On"]["act"]],
-        ["Markets panic", c["regime"]["Risk-Off"]["do_nothing"], c["regime"]["Risk-Off"]["act"]],
-    ], columns=["Market mood", "Do nothing (%)", "If you act (%)"])
-
-    st.table(regime_df)
-
-    # -------- KID EXPLANATION --------
-    st.markdown("### 🧠 Explain it to a 10-year-old")
-
-    st.success(c["kid"])
-
-    # -------- DO NOTHING VS ACT --------
-    st.markdown("## ⚖️ Do Nothing vs Act")
-
-    left, right = st.columns(2)
-
-    with left:
-        st.markdown("### 🟦 Do Nothing")
-        st.markdown("""
-        - Portfolio stays balanced  
-        - Losses grow slowly  
-        - You have time to react  
-        - Diversification still helps  
-        """)
-
-    with right:
-        st.markdown("### 🟥 Act on this decision")
-        st.markdown(f"""
-        - Bigger swings up **and down**  
-        - Losses grow faster  
-        - Assets move together  
-        - Recovery takes longer  
-        """)
-
-    st.markdown(
-        f"""
-        ⚠️ **Simple truth:**  
-        Doing nothing keeps risk **manageable**.  
-        Acting makes mistakes **hurt faster**.
-        """
-    )
+Before capital is committed.
+""")
