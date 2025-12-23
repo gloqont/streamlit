@@ -183,18 +183,36 @@ st.markdown("## 🧠 Your Decision Patterns")
 if len(st.session_state.decision_log) >= 3:
     df = pd.DataFrame(st.session_state.decision_log)
 
+    # ---- HARD SCHEMA NORMALIZATION ----
+    REQUIRED_COLS = ["type", "risk", "mode"]
+    for col in REQUIRED_COLS:
+        if col not in df.columns:
+            df[col] = np.nan
+
     insights = []
 
-    if df[df["type"] == "macro"]["risk"].mean() > df[df["type"] == "asset"]["risk"].mean():
-        insights.append("You **underestimate downside in macro decisions**.")
+    # ---- SAFE MACRO vs ASSET CHECK ----
+    macro_risk = df.loc[df["type"] == "macro", "risk"].dropna()
+    asset_risk = df.loc[df["type"] == "asset", "risk"].dropna()
 
-    if df[df["mode"].str.contains("Reflexive")]["risk"].mean() > 4:
+    if not macro_risk.empty and not asset_risk.empty:
+        if macro_risk.mean() > asset_risk.mean():
+            insights.append("You **underestimate downside in macro decisions**.")
+
+    # ---- SAFE MODE CHECK ----
+    reflexive_risk = df.loc[
+        df["mode"].astype(str).str.contains("Reflexive", na=False),
+        "risk"
+    ].dropna()
+
+    if not reflexive_risk.empty and reflexive_risk.mean() > 4:
         insights.append("You **oversize trades in Reflexive mode**.")
 
+    # ---- OUTPUT ----
     if insights:
         for i in insights:
             st.error(i)
     else:
-        st.success("No dominant behavioral risks detected yet.")
+        st.success("No dominant behavioral risk patterns detected yet.")
 else:
     st.info("Decision pathology appears after more decisions.")
