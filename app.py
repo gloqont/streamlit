@@ -212,20 +212,34 @@ st.markdown("## 🔁 Decision Replay (Simulated Outcomes)")
 if st.session_state.decision_log:
     df = pd.DataFrame(st.session_state.decision_log)
 
-    # ---- SCHEMA NORMALIZATION (CRITICAL FIX) ----
-    if "expected_pct" not in df.columns:
-        df["expected_pct"] = np.nan
-    if "observed_pct" not in df.columns:
-        df["observed_pct"] = np.nan
-    if "portfolio_value" not in df.columns:
-        df["portfolio_value"] = total_value
+    # ---- HARD SCHEMA NORMALIZATION ----
+    REQUIRED_COLS = [
+        "time",
+        "decision",
+        "target",
+        "expected_pct",
+        "observed_pct",
+        "portfolio_value",
+    ]
+
+    for col in REQUIRED_COLS:
+        if col not in df.columns:
+            df[col] = np.nan
 
     df["Expected P&L ($)"] = (df["portfolio_value"] * df["expected_pct"] / 100).round(0)
     df["Observed P&L ($)"] = (df["portfolio_value"] * df["observed_pct"] / 100).round(0)
 
+    display_cols = [
+        "time",
+        "decision",
+        "target",
+        "Expected P&L ($)",
+        "Observed P&L ($)",
+    ]
+
     st.caption("Observed outcomes are simulated for calibration illustration only.")
     st.dataframe(
-        df[["time", "decision", "target", "Expected P&L ($)", "Observed P&L ($)"]],
+        df.reindex(columns=display_cols),
         use_container_width=True
     )
 else:
