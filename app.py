@@ -1,77 +1,89 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-from uuid import uuid4
 from datetime import datetime
+import random
+import re
 
 # ================= CONFIG =================
-st.set_page_config(page_title="GLOQONT — Decision Consequences", layout="centered")
+st.set_page_config(page_title="GLOQONT", layout="centered")
 
 # ================= HELPERS =================
 def now():
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-# ================= CORE CONSEQUENCE ENGINE =================
-def consequence_engine(decision_type, decision_text, magnitude):
-    """
-    Consequences scale based on:
-    - decision type
-    - magnitude
-    - whether decision sounds concentrated, macro, or risky
-    """
+def random_price(base, vol=0.05):
+    return round(base * (1 + np.random.uniform(-vol, vol)), 2)
 
-    text = decision_text.lower()
+# ================= RANDOM PORTFOLIO =================
+@st.cache_data
+def generate_portfolio():
+    assets = [
+        # USA
+        ("AAPL", "USA", "Equity", 190),
+        ("MSFT", "USA", "Equity", 420),
+        ("NVDA", "USA", "Equity", 1150),
+        # Canada
+        ("SHOP", "Canada", "Equity", 75),
+        ("TD", "Canada", "Equity", 63),
+        # Europe
+        ("SAP", "Europe", "Equity", 185),
+        ("ASML", "Europe", "Equity", 920),
+        # India
+        ("RELIANCE", "India", "Equity", 2900),
+        ("TCS", "India", "Equity", 3900),
+        # Crypto
+        ("BTC", "Global", "Crypto", 65000),
+    ]
 
-    concentration_boost = 1.4 if any(x in text for x in ["nvda", "single", "one", "all in"]) else 1.0
-    macro_boost = 1.6 if decision_type in ["Macro Event", "Shock Scenario"] else 1.0
-    size_boost = 1 + magnitude / 20
+    rows = []
+    for a, region, cls, base in assets:
+        qty = round(np.random.uniform(2, 25), 2) if a == "BTC" else random.randint(5, 120)
+        price = random_price(base)
+        value = qty * price
+        rows.append([a, region, cls, qty, price, value])
 
-    risk_multiplier = concentration_boost * macro_boost * size_boost
-
-    base_vol = 1.2  # %
-    p5 = -base_vol * risk_multiplier * 2.2
-    p50 = base_vol * (1 / risk_multiplier)
-    p95 = base_vol * risk_multiplier * 1.3
-
-    drawdown = abs(p5) * 1.4
-
-    attribution = {
-        "Target asset exposure": round(55 * concentration_boost, 1),
-        "Correlation increase": round(30 * macro_boost, 1),
-        "Liquidity loss": round(15 * size_boost, 1),
-    }
-
-    regime = {
-        "Risk-On": {"do_nothing": 0.8, "act": p95},
-        "Risk-Off": {"do_nothing": -1.1, "act": p5},
-    }
-
-    liquidity_flag = "⚠️ Harder to exit quickly" if magnitude > 10 else "✓ Liquidity stable"
-
-    kid_explanation = (
-        f"If things go bad, you lose money **faster than before**.\n\n"
-        f"Before, falling hurt a little.\n"
-        f"After this decision, falling hurts **a lot more**."
+    df = pd.DataFrame(
+        rows,
+        columns=["Asset", "Region", "Class", "Quantity", "Price", "Value"]
     )
 
-    return {
-        "distribution": (p5, p50, p95),
-        "drawdown": drawdown,
-        "attribution": attribution,
-        "regime": regime,
-        "liquidity": liquidity_flag,
-        "kid": kid_explanation,
-        "multiplier": round(abs(p5) / base_vol, 1),
-    }
+    total = df["Value"].sum()
+    df["Weight (%)"] = (df["Value"] / total * 100).round(2)
 
-# ================= UI =================
+    pnl_pct = round(np.random.uniform(-1.5, 1.5), 2)
+    pnl_val = round(total * pnl_pct / 100, 2)
+
+    return df, total, pnl_pct, pnl_val
+
+portfolio, total_value, pnl_pct, pnl_val = generate_portfolio()
+
+# ================= LANDING =================
 st.title("GLOQONT")
-st.caption("What happens to your money if you do this?")
+st.caption("What happens to your portfolio if you do this?")
 
 st.markdown("""
-Before money moves, GLOQONT shows **what gets worse**.
-Not predictions. **Consequences.**
+**GLOQONT is portfolio-aware decision intelligence.**  
+Every answer is based on *your actual holdings*, not generic theory.
 """)
+
+# ================= PORTFOLIO VIEW =================
+st.markdown("## 💼 Your Portfolio (Live Snapshot)")
+
+st.metric(
+    "Total Portfolio Value",
+    f"${total_value:,.0f}",
+    f"{pnl_pct}% ({'+' if pnl_val>=0 else ''}${pnl_val:,.0f})"
+)
+
+st.dataframe(portfolio, use_container_width=True)
+
+# ================= MODE =================
+mode = st.radio(
+    "How do you operate?",
+    ["Trader Mode", "Investor Mode"],
+    horizontal=True
+)
 
 # ================= DECISION INPUT =================
 with st.form("decision"):
@@ -82,91 +94,109 @@ with st.form("decision"):
 
     decision_text = st.text_input(
         "What are you about to do?",
-        placeholder="Buy NVDA +5%, Reduce equities −10%, Fed hikes 50bps"
+        placeholder="Buy NVDA +5%, Sell BTC, Reduce India exposure, Fed hikes 50bps"
     )
 
-    magnitude = st.slider("How big is this decision (%)", 1, 30, 5)
+    magnitude = st.slider("Decision size (%)", 1, 30, 5)
 
-    submitted = st.form_submit_button("Show Consequences")
+    submit = st.form_submit_button("Show Consequences")
 
-# ================= CONSEQUENCE OUTPUT =================
-if submitted and decision_text.strip():
+# ================= CONSEQUENCE ENGINE =================
+def analyze_decision(text):
+    text = text.lower()
+    for asset in portfolio["Asset"]:
+        if asset.lower() in text:
+            return asset
+    if "india" in text:
+        return "India"
+    if "usa" in text or "us " in text:
+        return "USA"
+    if "crypto" in text or "btc" in text:
+        return "BTC"
+    return None
 
-    c = consequence_engine(decision_type, decision_text, magnitude)
+def consequence_engine(asset_hit, magnitude):
+    if asset_hit in portfolio["Asset"].values:
+        w = portfolio.loc[portfolio["Asset"] == asset_hit, "Weight (%)"].iloc[0]
+    elif asset_hit in portfolio["Region"].values:
+        w = portfolio.loc[portfolio["Region"] == asset_hit, "Weight (%)"].sum()
+    else:
+        w = 15  # macro default
 
-    st.markdown("## 🔴 What this decision does to your portfolio")
+    base_risk = w / 10
+    size_boost = 1 + magnitude / 20
+    risk = base_risk * size_boost
 
-    st.error(
-        f"""
-        **Big picture:**  
-        This decision makes bad outcomes **{c['multiplier']}× worse** when markets turn against you.
-        """
+    worst = -risk * 2.5
+    best = risk * 1.3
+
+    if mode == "Trader Mode":
+        break_time = max(3, int(40 / risk))
+        unit = "minutes"
+    else:
+        break_time = max(7, int(50 / risk))
+        unit = "days"
+
+    auto_block = risk > 6 or break_time <= 5
+
+    return {
+        "weight": round(w, 2),
+        "worst": round(worst, 2),
+        "best": round(best, 2),
+        "multiplier": round(risk, 1),
+        "break_time": break_time,
+        "unit": unit,
+        "block": auto_block
+    }
+
+# ================= OUTPUT =================
+if submit and decision_text.strip():
+
+    hit = analyze_decision(decision_text)
+    c = consequence_engine(hit, magnitude)
+
+    st.markdown("## 🔴 Decision Consequences")
+
+    if c["block"]:
+        st.error("🚫 DO NOT TRADE THIS — downside accelerates beyond control")
+    else:
+        st.warning("⚠️ Elevated risk — proceed only with strict discipline")
+
+    st.markdown(f"""
+    **What you are impacting:** `{hit or 'Multiple assets / macro'}`  
+    **Portfolio exposure affected:** **{c['weight']}%**
+    """)
+
+    st.metric(
+        "How much worse losses become",
+        f"{c['multiplier']}×"
     )
 
-    # -------- P&L DISTRIBUTION --------
-    st.markdown("### 📊 Portfolio Outcomes (Next 30 Days)")
+    st.markdown("### 📊 Portfolio Impact")
 
-    dist_df = pd.DataFrame({
-        "Scenario": ["Worst case", "Typical", "Best case"],
-        "Portfolio change (%)": [
-            round(c["distribution"][0], 2),
-            round(c["distribution"][1], 2),
-            round(c["distribution"][2], 2),
-        ]
-    })
+    st.table(pd.DataFrame({
+        "Scenario": ["Worst case", "Best case"],
+        "Portfolio change (%)": [c["worst"], c["best"]]
+    }))
 
-    st.table(dist_df)
+    st.markdown("### ⏱️ How fast things break")
 
-    # -------- WORST CASE --------
-    st.markdown("### 💥 Worst-Case Damage")
-
-    st.warning(
-        f"""
-        If things go wrong, your portfolio can fall **{round(c['drawdown'],2)}%**
-        before you can recover.
-        """
+    st.metric(
+        "Damage accelerates in",
+        f"{c['break_time']} {c['unit']}"
     )
 
-    # -------- ATTRIBUTION --------
-    st.markdown("### 🧩 What causes the damage")
+    st.markdown("### 🧠 Explain it simply")
 
-    attr_df = pd.DataFrame.from_dict(
-        c["attribution"], orient="index", columns=["% of total downside"]
-    )
+    if mode == "Trader Mode":
+        st.success(
+            "If this goes wrong, losses stack up **faster than you can fix them**."
+        )
+    else:
+        st.success(
+            "If this goes wrong, bad years become **much harder to recover from**."
+        )
 
-    st.bar_chart(attr_df)
-
-    # -------- CORRELATION --------
-    st.markdown("### 🔗 Correlation Breakage")
-
-    st.info(
-        """
-        Assets that usually move separately now **fall together**.
-        Diversification protects you less when you need it most.
-        """
-    )
-
-    # -------- LIQUIDITY --------
-    st.markdown("### 💧 Liquidity Stress")
-
-    st.write(c["liquidity"])
-
-    # -------- REGIME --------
-    st.markdown("### 🌧️ What happens in different markets")
-
-    regime_df = pd.DataFrame([
-        ["Markets calm", c["regime"]["Risk-On"]["do_nothing"], c["regime"]["Risk-On"]["act"]],
-        ["Markets panic", c["regime"]["Risk-Off"]["do_nothing"], c["regime"]["Risk-Off"]["act"]],
-    ], columns=["Market mood", "Do nothing (%)", "If you act (%)"])
-
-    st.table(regime_df)
-
-    # -------- KID EXPLANATION --------
-    st.markdown("### 🧠 Explain it to a 10-year-old")
-
-    st.success(c["kid"])
-
-    # -------- DO NOTHING VS ACT --------
     st.markdown("## ⚖️ Do Nothing vs Act")
 
     left, right = st.columns(2)
@@ -176,23 +206,17 @@ if submitted and decision_text.strip():
         st.markdown("""
         - Portfolio stays balanced  
         - Losses grow slowly  
-        - You have time to react  
-        - Diversification still helps  
+        - You keep flexibility  
         """)
 
     with right:
-        st.markdown("### 🟥 Act on this decision")
-        st.markdown(f"""
-        - Bigger swings up **and down**  
-        - Losses grow faster  
-        - Assets move together  
+        st.markdown("### 🟥 Act")
+        st.markdown("""
+        - Concentration increases  
+        - Losses accelerate  
         - Recovery takes longer  
         """)
 
     st.markdown(
-        f"""
-        ⚠️ **Simple truth:**  
-        Doing nothing keeps risk **manageable**.  
-        Acting makes mistakes **hurt faster**.
-        """
+        "**Bottom line:** Acting increases both **speed** and **depth** of damage."
     )
