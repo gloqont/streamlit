@@ -248,3 +248,61 @@ if submit and decision_text.strip():
         "observed_pct": observed,
         "portfolio_value": total_value
     })
+
+        # ================= ADDITION: PORTFOLIO-LEVEL IRREVERSIBLE EXPOSURE =================
+    st.markdown("### 🧠 Portfolio-Level Irreversible Exposure")
+
+    # --- heuristic thresholds (intentionally simple & explainable) ---
+    IRREVERSIBLE_THRESHOLD = 4.5  # structural loss regime
+
+    # --- classify assets ---
+    equity_mask = portfolio["Class"] == "Equity"
+    macro_mask = portfolio["Region"] != "USA"  # proxy for macro sensitivity
+    liquidity_mask = portfolio["Class"].isin(["Crypto"])  # proxy for liquidity lock
+
+    # --- base irreversible exposure before decision (static baseline) ---
+    base_multiplier = 3.0  # conservative baseline stress
+    base_irrev = portfolio["Weight (%)"][portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD].sum()
+
+    # --- incremental exposure from this decision ---
+    decision_irrev = 0.0
+    if c["multiplier"] > IRREVERSIBLE_THRESHOLD:
+        decision_irrev = c["weight"]
+
+    # --- aggregated after-decision exposure ---
+    total_irrev_after = min(100.0, base_irrev + decision_irrev)
+
+    # --- category breakdowns ---
+    equity_irrev = portfolio.loc[
+        equity_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
+        "Weight (%)"
+    ].sum()
+
+    macro_irrev = portfolio.loc[
+        macro_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
+        "Weight (%)"
+    ].sum()
+
+    liquidity_irrev = portfolio.loc[
+        liquidity_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
+        "Weight (%)"
+    ].sum()
+
+    # --- display (one number, one statement, clean breakdown) ---
+    st.markdown(
+        f"This decision increases irreversible exposure from "
+        f"{base_irrev:.0f}% → {total_irrev_after:.0f}% of the portfolio under stress."
+    )
+
+    st.markdown(
+        f"• Equity irreversible exposure: {equity_irrev:.0f}%\n"
+        f"• Macro-sensitive irreversible exposure: {macro_irrev:.0f}%\n"
+        f"• Liquidity-locked irreversible exposure: {liquidity_irrev:.0f}%"
+    )
+
+    if decision_irrev > 0:
+        st.error(
+            "A material portion of the portfolio has entered a structurally fragile state. "
+            "Recovery now depends on favorable external conditions, not decision quality."
+        )
+
