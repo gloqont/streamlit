@@ -27,7 +27,7 @@ def compute_consequences(decision):
     equity_weight = sum(p["weight"] for p in positions if p["class"] in ["Equity", "Crypto"])
 
     return {
-        "Concentration Risk": "High" if decision["magnitude_pct"] > 10 else "Moderate",
+        "Concentration Risk": "High" if decision["magnitude"] > 10 else "Moderate",
         "Volatility Sensitivity": "Very High" if leverage else "High" if equity_weight > 60 else "Moderate",
         "Correlation Fragility": "High" if len([p for p in positions if p["class"] == "Equity"]) > 2 else "Moderate",
         "Regime Dependence": "Very High" if equity_weight > 70 else "Moderate",
