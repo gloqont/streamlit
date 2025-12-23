@@ -17,6 +17,10 @@ if "decision_committed" not in st.session_state:
 if "decision_aborted" not in st.session_state:
     st.session_state.decision_aborted = False
 
+# Impossible state guard
+if st.session_state.decision_committed and st.session_state.decision is None:
+    st.session_state.decision_committed = False
+
 # ================= LEDGER =================
 def load_ledger():
     if not os.path.exists(LEDGER_FILE):
@@ -47,40 +51,39 @@ def compute_consequences(decision):
     }
 
 def derive_assumptions(c):
-    a = []
+    assumptions = []
     if c["Volatility Sensitivity"] in ["High", "Very High"]:
-        a.append("Market volatility must remain stable.")
+        assumptions.append("Market volatility must remain stable.")
     if c["Correlation Fragility"] == "High":
-        a.append("Asset correlations must not converge.")
+        assumptions.append("Asset correlations must not converge.")
     if c["Regime Dependence"] in ["High", "Very High"]:
-        a.append("The current market regime must persist.")
+        assumptions.append("The current market regime must persist.")
     if c["Concentration Risk"] == "High":
-        a.append("This position must perform with little margin for error.")
-    return a
+        assumptions.append("This position must perform with little margin for error.")
+    return assumptions
 
-# ================= RENDER =================
+# ================= UI =================
 st.title("GLOQONT")
 
-# ================= ABORTED =================
+# ================= ABORT FLOW =================
 if st.session_state.decision_aborted:
     st.error("Decision aborted. No analysis shown.")
-    if st.button("Start new decision"):
+    if st.button("Start a new decision"):
         st.session_state.clear()
+        st.rerun()
     st.stop()
 
 # ================= DECISION GATE =================
 if not st.session_state.decision_committed:
 
-    st.markdown(
-        """
-        ### Before capital moves, stop.
+    st.markdown("""
+    ### Before capital moves, stop.
 
-        Most investors lose money **not because of bad ideas**,  
-        but because they **don’t see consequences before acting**.
+    Most investors lose money **not because of bad ideas**,  
+    but because they **don’t see consequences before acting**.
 
-        GLOQONT forces that moment.
-        """
-    )
+    GLOQONT forces that moment.
+    """)
 
     st.markdown("## What are you about to do?")
 
@@ -89,7 +92,7 @@ if not st.session_state.decision_committed:
             "Decision",
             ["Increase exposure", "Decrease exposure", "Exit position"]
         )
-        asset = st.text_input("Asset / Ticker", placeholder="e.g. NVDA, BTC")
+        asset = st.text_input("Asset / Ticker", placeholder="e.g. AAPL, NVDA, BTC")
         magnitude = st.number_input("Change in exposure (%)", 0.0, 100.0, 5.0)
         horizon = st.selectbox("Time horizon", ["7 days", "30 days", "90 days"])
         submitted = st.form_submit_button("Continue")
@@ -105,6 +108,7 @@ if not st.session_state.decision_committed:
         }
 
     if st.session_state.decision:
+
         st.markdown("## What does this decision affect?")
 
         portfolio = st.data_editor(
@@ -158,7 +162,6 @@ if not st.session_state.decision_committed:
             save_to_ledger(st.session_state.decision)
             st.rerun()
 
-
         if choice == "Proceed with decision" and ack:
             st.session_state.decision_committed = True
             st.session_state.decision["commitment"] = {
@@ -168,35 +171,58 @@ if not st.session_state.decision_committed:
             save_to_ledger(st.session_state.decision)
             st.rerun()
 
-
     st.stop()
 
-# ================= POST-DECISION INTELLIGENCE =================
+# ================= POST-DECISION =================
 if st.session_state.decision is None:
-    st.error("No decision found in session. Please start again.")
+    st.error("No decision found. Please restart.")
     if st.button("Start new decision"):
         st.session_state.clear()
+        st.rerun()
     st.stop()
 
 st.success("Decision committed. Intelligence unlocked.")
 
-st.markdown("## Decision Impact Overview")
-st.write(
-    f"""
-    **Decision:** {st.session_state.decision['intent']}  
-    **Asset:** {st.session_state.decision['asset']}  
-    **Magnitude:** {st.session_state.decision['magnitude']}%  
-    **Horizon:** {st.session_state.decision['horizon']}
-    """
-)
+st.markdown("## What Changed Because of This Decision")
 
-st.info(
-    "This is where your existing dashboards, risk models, and simulations plug in — "
-    "**all scoped to this decision.**"
-)
+st.write(f"""
+**Decision:** {st.session_state.decision['intent']}  
+**Asset:** {st.session_state.decision['asset']}  
+**Magnitude:** {st.session_state.decision['magnitude']}%  
+**Horizon:** {st.session_state.decision['horizon']}
+""")
 
-st.markdown("## Decision Ledger")
-for d in reversed(load_ledger()):
-    st.write(
-        f"- **{d['intent']} {d['asset']} ({d['magnitude']}%)** → {d['commitment']['action']}"
-    )
+# ================= DO NOTHING vs ACT =================
+st.markdown("## If You Do Nothing vs If You Act")
+
+left, right = st.columns(2)
+
+with left:
+    st.markdown("### 🟥 If You Do Nothing")
+    st.markdown("""
+    - Portfolio remains unchanged  
+    - No new concentration introduced  
+    - No additional regime dependence  
+    - No new assumptions required  
+    """)
+
+with right:
+    st.markdown("### 🟩 If You Act")
+    st.markdown(f"""
+    - +{st.session_state.decision['magnitude']}% exposure to **{st.session_state.decision['asset']}**  
+    - Increases concentration risk  
+    - Increases regime sensitivity  
+    - Introduces fragile assumptions  
+    """)
+
+# ================= LEDGER =================
+st.markdown("## Decisions You Have Made (and Avoided)")
+
+ledger = load_ledger()
+if not ledger:
+    st.info("No decisions recorded yet.")
+else:
+    for d in reversed(ledger):
+        st.write(
+            f"- **{d['intent']} {d['asset']} ({d['magnitude']}%)** → {d['commitment']['action']}"
+        )
