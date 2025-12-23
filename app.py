@@ -26,10 +26,7 @@ def load_demo_portfolio():
         ("BTC", "Global", "Crypto", 1.2, 65000),
     ]
 
-    df = pd.DataFrame(
-        rows,
-        columns=["Asset", "Region", "Class", "Quantity", "Price"]
-    )
+    df = pd.DataFrame(rows, columns=["Asset", "Region", "Class", "Quantity", "Price"])
     df["Value"] = df["Quantity"] * df["Price"]
     total = df["Value"].sum()
     df["Weight (%)"] = (df["Value"] / total * 100).round(2)
@@ -53,12 +50,7 @@ It does not predict prices. It reveals consequences before capital is committed.
 # ================= PORTFOLIO VIEW =================
 st.markdown("## 💼 Portfolio Snapshot")
 
-st.metric(
-    "Total Portfolio Value",
-    f"${total_value:,.0f}",
-    f"+{pnl_pct}% (${pnl_val:,.0f})"
-)
-
+st.metric("Total Portfolio Value", f"${total_value:,.0f}", f"+{pnl_pct}% (${pnl_val:,.0f})")
 st.dataframe(portfolio, use_container_width=True)
 
 # ================= MODE =================
@@ -74,12 +66,10 @@ with st.form("decision"):
         "Decision Type",
         ["Trade Decision", "Portfolio Reallocation", "Macro Event", "Shock Scenario"]
     )
-
     decision_text = st.text_input(
         "What decision are you about to make?",
         placeholder="Buy NVDA +5%, Reduce India exposure, Fed hikes 50bps"
     )
-
     magnitude = st.slider("Decision Size / Intensity (%)", 1, 30, 5)
     submit = st.form_submit_button("Show Consequences")
 
@@ -142,11 +132,7 @@ if submit and decision_text.strip():
     st.markdown("## 🔴 Decision Consequences")
 
     st.markdown("### 🟢 If You Do Nothing")
-    st.markdown(
-        "• Portfolio risk remains unchanged\n"
-        "• Expected drift: +0.6%\n"
-        "• No acceleration of downside"
-    )
+    st.markdown("• Portfolio risk remains unchanged\n• Expected drift: +0.6%\n• No acceleration of downside")
 
     st.markdown("### 🔴 If You Execute This Decision")
 
@@ -155,88 +141,13 @@ if submit and decision_text.strip():
     else:
         st.warning("Risk increases materially — execution requires discipline")
 
-    st.markdown(
-        f"Primary exposure impacted: {target}\n\n"
-        f"Portfolio weight affected: {c['weight']}%"
-    )
-
+    st.markdown(f"Primary exposure impacted: {target}\n\nPortfolio weight affected: {c['weight']}%")
     st.metric("Downside amplification", f"{c['multiplier']}×")
 
-    st.markdown("### 📊 Portfolio Impact Distribution")
     st.table(pd.DataFrame({
         "Scenario": ["Worst Case", "Best Case"],
         "Portfolio Change (%)": [c["worst"], c["best"]]
     }))
-
-    st.markdown("### ⏱️ Time-to-Damage")
-    st.metric("Losses accelerate within", f"{c['break_time']} {c['unit']}")
-
-    st.markdown("### 🌪️ Fragile Under Market Regimes")
-    st.markdown(
-        "• Volatility expansion\n"
-        "• Liquidity contraction\n"
-        "• Correlation spikes"
-    )
-
-    st.markdown("### 🧩 Risk Concentration Attribution")
-    st.dataframe(
-        portfolio[["Asset", "Weight (%)"]].sort_values("Weight (%)", ascending=False),
-        use_container_width=True
-    )
-
-    # ===== FIXED IRREVERSIBILITY TEXT (NO ** ANYWHERE) =====
-    st.markdown("### 🚨 Irreversibility Check")
-
-    capital_loss = abs(c["worst"]) * total_value / 100
-    opportunity_loss = capital_loss * 0.6
-
-    st.markdown(
-        f"If this goes wrong, what cannot be undone:\n\n"
-        f"• Capital lost: ~${capital_loss:,.0f}\n"
-        f"• Time to recover: ~{c['break_time']} {c['unit']}\n"
-        f"• Opportunity cost: ~${opportunity_loss:,.0f}"
-    )
-
-    # ================= ADDITION: IRREVERSIBLE-LOSS HEATMAP =================
-    st.markdown("### 🔥 Irreversible-Loss Heatmap")
-
-    time_horizon = ["Weeks", "Months", "Years"]
-    capital_risk = np.array([5, 10, 15, 20, 25, 30])
-
-    heatmap = np.zeros((len(capital_risk), len(time_horizon)))
-
-    for i, cap in enumerate(capital_risk):
-        for j, t in enumerate(time_horizon):
-            score = cap * (j + 1) * c["multiplier"]
-            if score < 40:
-                heatmap[i, j] = 1    # recoverable
-            elif score < 75:
-                heatmap[i, j] = 2    # delayed
-            else:
-                heatmap[i, j] = 3    # unrecoverable
-
-    heatmap_df = pd.DataFrame(
-        heatmap,
-        index=[f"{c}% capital" for c in capital_risk],
-        columns=time_horizon
-    )
-
-    st.dataframe(
-        heatmap_df.replace({
-            1: "Recoverable",
-            2: "Delayed recovery",
-            3: "Unrecoverable"
-        }),
-        use_container_width=True
-    )
-
-    unrecoverable_pct = capital_risk[heatmap.max(axis=1) == 3].max(initial=0)
-
-    if unrecoverable_pct > 0:
-        st.error(
-            f"This decision pushes approximately {unrecoverable_pct}% "
-            "of your portfolio into an unrecoverable loss zone under stress."
-        )
 
     observed = round(c["expected"] * np.random.uniform(0.5, 1.4), 2)
 
@@ -249,131 +160,12 @@ if submit and decision_text.strip():
         "portfolio_value": total_value
     })
 
-        # ================= ADDITION: PORTFOLIO-LEVEL IRREVERSIBLE EXPOSURE =================
-    st.markdown("### 🧠 Portfolio-Level Irreversible Exposure")
-
-    # --- heuristic thresholds (intentionally simple & explainable) ---
-    IRREVERSIBLE_THRESHOLD = 4.5  # structural loss regime
-
-    # --- classify assets ---
-    equity_mask = portfolio["Class"] == "Equity"
-    macro_mask = portfolio["Region"] != "USA"  # proxy for macro sensitivity
-    liquidity_mask = portfolio["Class"].isin(["Crypto"])  # proxy for liquidity lock
-
-    # --- base irreversible exposure before decision (static baseline) ---
-    base_multiplier = 3.0  # conservative baseline stress
-    base_irrev = portfolio["Weight (%)"][portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD].sum()
-
-    # --- incremental exposure from this decision ---
-    decision_irrev = 0.0
-    if c["multiplier"] > IRREVERSIBLE_THRESHOLD:
-        decision_irrev = c["weight"]
-
-    # --- aggregated after-decision exposure ---
-    total_irrev_after = min(100.0, base_irrev + decision_irrev)
-
-    # --- category breakdowns ---
-    equity_irrev = portfolio.loc[
-        equity_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
-        "Weight (%)"
-    ].sum()
-
-    macro_irrev = portfolio.loc[
-        macro_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
-        "Weight (%)"
-    ].sum()
-
-    liquidity_irrev = portfolio.loc[
-        liquidity_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
-        "Weight (%)"
-    ].sum()
-
-    # --- display (one number, one statement, clean breakdown) ---
-    st.markdown(
-        f"This decision increases irreversible exposure from "
-        f"{base_irrev:.0f}% → {total_irrev_after:.0f}% of the portfolio under stress."
-    )
-
-    st.markdown(
-        f"• Equity irreversible exposure: {equity_irrev:.0f}%\n"
-        f"• Macro-sensitive irreversible exposure: {macro_irrev:.0f}%\n"
-        f"• Liquidity-locked irreversible exposure: {liquidity_irrev:.0f}%"
-    )
-
-    if decision_irrev > 0:
-        st.error(
-            "A material portion of the portfolio has entered a structurally fragile state. "
-            "Recovery now depends on favorable external conditions, not decision quality."
-        )
-
-    # ================= ADDITION: IRREVERSIBLE EXPOSURE TREND (POST-MORTEM) =================
+# ================= IRREVERSIBLE EXPOSURE TREND =================
 st.markdown("## 📉 Irreversible Exposure Trend (Post-Decision)")
 
 if len(st.session_state.decision_log) >= 2:
     df = pd.DataFrame(st.session_state.decision_log)
 
-    # --- schema safety ---
-    required_cols = ["expected_pct", "portfolio_value"]
-    if not set(required_cols).issubset(df.columns):
-        st.info("Irreversible exposure trend not available yet.")
-    else:
-        # --- reconstruct irreversible exposure per decision ---
-        IRREVERSIBLE_THRESHOLD = 4.5
-        base_multiplier = 3.0
-
-        # baseline irreversible exposure (static portfolio)
-        base_irrev = portfolio["Weight (%)"][
-            portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD
-        ].sum()
-
-        irrev_series = []
-
-        for _, row in df.iterrows():
-            # approximate decision multiplier from expected impact
-            decision_multiplier = abs(row["expected_pct"]) / max(1e-6, portfolio["Weight (%)"].mean())
-            decision_irrev = 0.0
-
-            if decision_multiplier > IRREVERSIBLE_THRESHOLD:
-                decision_irrev = portfolio["Weight (%)"].mean()
-
-            irrev_series.append(min(100.0, base_irrev + decision_irrev))
-
-        trend_df = pd.DataFrame({
-            "Decision #": range(1, len(irrev_series) + 1),
-            "Irreversible Exposure (%)": irrev_series
-        })
-
-        # --- plot (minimal, no decoration) ---
-        st.line_chart(
-            trend_df.set_index("Decision #"),
-            height=220
-        )
-
-        # --- single annotation ---
-        increases = sum(
-            1 for i in range(1, len(irrev_series))
-            if irrev_series[i] > irrev_series[i - 1]
-        )
-
-        if increases > 0:
-            st.markdown(
-                f"Irreversible exposure has increased in **{increases} of the last "
-                f"{len(irrev_series) - 1} decisions**."
-            )
-        else:
-            st.markdown(
-                "Irreversible exposure has remained stable across recent decisions."
-            )
-else:
-    st.info("Irreversible exposure trend appears after multiple decisions.")
-
-    # ================= ADDITION: IRREVERSIBLE EXPOSURE GUARDRAIL =================
-st.markdown("## 🚧 Irreversible Exposure Guardrail")
-
-if len(st.session_state.decision_log) >= 2:
-    df = pd.DataFrame(st.session_state.decision_log)
-
-    # --- reconstruct irreversible exposure per decision (same heuristic, minimal) ---
     IRREVERSIBLE_THRESHOLD = 4.5
     base_multiplier = 3.0
 
@@ -381,51 +173,44 @@ if len(st.session_state.decision_log) >= 2:
         portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD
     ].sum()
 
-    irrev_history = []
+    irrev_series = []
 
     for _, row in df.iterrows():
-        approx_multiplier = abs(row["expected_pct"]) / max(
-            1e-6, portfolio["Weight (%)"].mean()
-        )
-        incr = portfolio["Weight (%)"].mean() if approx_multiplier > IRREVERSIBLE_THRESHOLD else 0.0
-        irrev_history.append(min(100.0, base_irrev + incr))
+        approx_mult = abs(row["expected_pct"]) / max(1e-6, portfolio["Weight (%)"].mean())
+        incr = portfolio["Weight (%)"].mean() if approx_mult > IRREVERSIBLE_THRESHOLD else 0.0
+        irrev_series.append(min(100.0, base_irrev + incr))
 
-    # include current decision
-    current_irrev = min(
-        100.0,
-        base_irrev + (c["weight"] if c["multiplier"] > IRREVERSIBLE_THRESHOLD else 0.0)
-    )
+    trend_df = pd.DataFrame({
+        "Decision #": range(1, len(irrev_series) + 1),
+        "Irreversible Exposure (%)": irrev_series
+    })
 
-    snapshot = irrev_history[-2:] + [current_irrev]
+    st.line_chart(trend_df.set_index("Decision #"), height=220)
 
-    # --- 1) Trend snapshot ---
-    st.markdown(
-        "Irreversible exposure: "
-        + " → ".join(f"{round(x)}%" for x in snapshot)
-    )
+# ================= IRREVERSIBLE EXPOSURE GUARDRAIL =================
+st.markdown("## 🚧 Irreversible Exposure Guardrail")
 
-    # --- 2) Consequence framing ---
-    st.warning(
-        "Further deterioration historically correlates with unrecoverable drawdowns."
-    )
+if len(st.session_state.decision_log) >= 2:
+    df = pd.DataFrame(st.session_state.decision_log)
 
-    # --- 3) Choice ---
-    st.markdown("### Choose how to proceed")
+    IRREVERSIBLE_THRESHOLD = 4.5
+    base_multiplier = 3.0
+
+    base_irrev = portfolio["Weight (%)"][
+        portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD
+    ].sum()
+
+    last = df.iloc[-1]
+    approx_mult = abs(last["expected_pct"]) / max(1e-6, portfolio["Weight (%)"].mean())
+    incr = portfolio["Weight (%)"].mean() if approx_mult > IRREVERSIBLE_THRESHOLD else 0.0
+    current_irrev = min(100.0, base_irrev + incr)
+
+    history = [round(base_irrev), round(current_irrev)]
+
+    st.markdown("Irreversible exposure: " + " → ".join(f"{x}%" for x in history))
+    st.warning("Further deterioration historically correlates with unrecoverable drawdowns.")
 
     col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.button("Proceed anyway")
-
-    with col2:
-        st.button("Reduce magnitude")
-
-    with col3:
-        st.button("Abort decision")
-else:
-    st.info("Guardrail activates after multiple decisions.")
-
-
-
-
-
+    with col1: st.button("Proceed anyway")
+    with col2: st.button("Reduce magnitude")
+    with col3: st.button("Abort decision")
