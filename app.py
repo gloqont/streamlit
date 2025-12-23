@@ -156,7 +156,8 @@ if not st.session_state.decision_committed:
                 "weakest_assumption": weakest,
             }
             save_to_ledger(st.session_state.decision)
-            st.experimental_rerun()
+            st.rerun()
+
 
         if choice == "Proceed with decision" and ack:
             st.session_state.decision_committed = True
@@ -165,7 +166,8 @@ if not st.session_state.decision_committed:
                 "weakest_assumption": weakest,
             }
             save_to_ledger(st.session_state.decision)
-            st.experimental_rerun()
+            st.rerun()
+
 
     st.stop()
 
