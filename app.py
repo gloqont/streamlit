@@ -306,3 +306,126 @@ if submit and decision_text.strip():
             "Recovery now depends on favorable external conditions, not decision quality."
         )
 
+    # ================= ADDITION: IRREVERSIBLE EXPOSURE TREND (POST-MORTEM) =================
+st.markdown("## 📉 Irreversible Exposure Trend (Post-Decision)")
+
+if len(st.session_state.decision_log) >= 2:
+    df = pd.DataFrame(st.session_state.decision_log)
+
+    # --- schema safety ---
+    required_cols = ["expected_pct", "portfolio_value"]
+    if not set(required_cols).issubset(df.columns):
+        st.info("Irreversible exposure trend not available yet.")
+    else:
+        # --- reconstruct irreversible exposure per decision ---
+        IRREVERSIBLE_THRESHOLD = 4.5
+        base_multiplier = 3.0
+
+        # baseline irreversible exposure (static portfolio)
+        base_irrev = portfolio["Weight (%)"][
+            portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD
+        ].sum()
+
+        irrev_series = []
+
+        for _, row in df.iterrows():
+            # approximate decision multiplier from expected impact
+            decision_multiplier = abs(row["expected_pct"]) / max(1e-6, portfolio["Weight (%)"].mean())
+            decision_irrev = 0.0
+
+            if decision_multiplier > IRREVERSIBLE_THRESHOLD:
+                decision_irrev = portfolio["Weight (%)"].mean()
+
+            irrev_series.append(min(100.0, base_irrev + decision_irrev))
+
+        trend_df = pd.DataFrame({
+            "Decision #": range(1, len(irrev_series) + 1),
+            "Irreversible Exposure (%)": irrev_series
+        })
+
+        # --- plot (minimal, no decoration) ---
+        st.line_chart(
+            trend_df.set_index("Decision #"),
+            height=220
+        )
+
+        # --- single annotation ---
+        increases = sum(
+            1 for i in range(1, len(irrev_series))
+            if irrev_series[i] > irrev_series[i - 1]
+        )
+
+        if increases > 0:
+            st.markdown(
+                f"Irreversible exposure has increased in **{increases} of the last "
+                f"{len(irrev_series) - 1} decisions**."
+            )
+        else:
+            st.markdown(
+                "Irreversible exposure has remained stable across recent decisions."
+            )
+else:
+    st.info("Irreversible exposure trend appears after multiple decisions.")
+
+    # ================= ADDITION: IRREVERSIBLE EXPOSURE GUARDRAIL =================
+st.markdown("## 🚧 Irreversible Exposure Guardrail")
+
+if len(st.session_state.decision_log) >= 2:
+    df = pd.DataFrame(st.session_state.decision_log)
+
+    # --- reconstruct irreversible exposure per decision (same heuristic, minimal) ---
+    IRREVERSIBLE_THRESHOLD = 4.5
+    base_multiplier = 3.0
+
+    base_irrev = portfolio["Weight (%)"][
+        portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD
+    ].sum()
+
+    irrev_history = []
+
+    for _, row in df.iterrows():
+        approx_multiplier = abs(row["expected_pct"]) / max(
+            1e-6, portfolio["Weight (%)"].mean()
+        )
+        incr = portfolio["Weight (%)"].mean() if approx_multiplier > IRREVERSIBLE_THRESHOLD else 0.0
+        irrev_history.append(min(100.0, base_irrev + incr))
+
+    # include current decision
+    current_irrev = min(
+        100.0,
+        base_irrev + (c["weight"] if c["multiplier"] > IRREVERSIBLE_THRESHOLD else 0.0)
+    )
+
+    snapshot = irrev_history[-2:] + [current_irrev]
+
+    # --- 1) Trend snapshot ---
+    st.markdown(
+        "Irreversible exposure: "
+        + " → ".join(f"{round(x)}%" for x in snapshot)
+    )
+
+    # --- 2) Consequence framing ---
+    st.warning(
+        "Further deterioration historically correlates with unrecoverable drawdowns."
+    )
+
+    # --- 3) Choice ---
+    st.markdown("### Choose how to proceed")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.button("Proceed anyway")
+
+    with col2:
+        st.button("Reduce magnitude")
+
+    with col3:
+        st.button("Abort decision")
+else:
+    st.info("Guardrail activates after multiple decisions.")
+
+
+
+
+
