@@ -17,7 +17,7 @@ if "decision_committed" not in st.session_state:
 if "decision_aborted" not in st.session_state:
     st.session_state.decision_aborted = False
 
-# Impossible state guard
+# Impossible-state guard
 if st.session_state.decision_committed and st.session_state.decision is None:
     st.session_state.decision_committed = False
 
@@ -45,8 +45,12 @@ def compute_consequences(decision):
 
     return {
         "Concentration Risk": "High" if decision["magnitude"] > 10 else "Moderate",
-        "Volatility Sensitivity": "Very High" if leverage else "High" if equity_weight > 60 else "Moderate",
-        "Correlation Fragility": "High" if len([p for p in positions if p["class"] == "Equity"]) > 2 else "Moderate",
+        "Volatility Sensitivity": "Very High"
+        if leverage
+        else "High" if equity_weight > 60 else "Moderate",
+        "Correlation Fragility": "High"
+        if len([p for p in positions if p["class"] == "Equity"]) > 2
+        else "Moderate",
         "Regime Dependence": "Very High" if equity_weight > 70 else "Moderate",
     }
 
@@ -65,11 +69,12 @@ def derive_assumptions(c):
 # ================= UI =================
 st.title("GLOQONT")
 
-# ================= ABORT FLOW =================
+# ================= ABORTED =================
 if st.session_state.decision_aborted:
-    st.error("Decision aborted. No further analysis shown.")
-    if st.button("Start a new decision"):
+    st.error("Decision aborted. No analysis shown.")
+    if st.button("Start new decision"):
         st.session_state.clear()
+        st.rerun()
     st.stop()
 
 # ================= DECISION GATE =================
@@ -79,10 +84,10 @@ if not st.session_state.decision_committed:
         """
         ### Before capital moves, stop.
 
-        Most investors don’t lose money because of bad ideas —  
-        they lose money because **they act without seeing downside first**.
+        Most investors lose money **not because of bad ideas**,  
+        but because they **don’t see what gets worse before acting**.
 
-        GLOQONT forces that pause.
+        GLOQONT forces that moment.
         """
     )
 
@@ -91,7 +96,7 @@ if not st.session_state.decision_committed:
     with st.form("decision_form"):
         intent = st.selectbox(
             "Decision",
-            ["Increase exposure", "Decrease exposure", "Exit position"]
+            ["Increase exposure", "Decrease exposure", "Exit position"],
         )
         asset = st.text_input("Asset / Ticker", placeholder="e.g. AAPL, NVDA, BTC")
         magnitude = st.number_input("Change in exposure (%)", 0.0, 100.0, 5.0)
@@ -109,7 +114,6 @@ if not st.session_state.decision_committed:
         }
 
     if st.session_state.decision:
-
         st.markdown("## What does this decision affect?")
 
         portfolio = st.data_editor(
@@ -133,10 +137,15 @@ if not st.session_state.decision_committed:
         st.markdown("## What gets worse because of this decision")
 
         consequences = compute_consequences(st.session_state.decision)
+
         for k, v in consequences.items():
             st.write(f"**{k}**: {v}")
 
-        st.markdown("## If You Do Nothing vs If You Act")
+        st.markdown(
+            "_These are not predictions. They are fragilities this decision introduces._"
+        )
+
+        st.markdown("## If you do nothing vs if you act")
 
         left, right = st.columns(2)
 
@@ -156,9 +165,9 @@ if not st.session_state.decision_committed:
             st.markdown(
                 f"""
                 - +{st.session_state.decision['magnitude']}% exposure to **{st.session_state.decision['asset']}**  
-                - Increases concentration risk — losses are harder to recover  
-                - Becomes more fragile during risk-off regimes  
-                - Failure of assumptions directly amplifies downside  
+                - Increases concentration risk — losses become harder to recover  
+                - Becomes more fragile to regime shifts (risk-off hurts more)  
+                - Failure of any assumption directly amplifies downside  
                 """
             )
 
@@ -166,13 +175,14 @@ if not st.session_state.decision_committed:
             f"""
             ⚠️ **Downside Summary:**  
             Acting increases your exposure to **{st.session_state.decision['asset']}**.
-            If conditions change, losses accelerate faster than doing nothing.
+            If conditions change, this decision amplifies losses faster than doing nothing.
             """
         )
 
         st.markdown("## What must stay true for this to work")
 
         assumptions = derive_assumptions(consequences)
+
         for a in assumptions:
             st.warning(a)
 
@@ -181,7 +191,7 @@ if not st.session_state.decision_committed:
 
         choice = st.radio(
             "Knowing this, what do you choose?",
-            ["Proceed with decision", "Abort decision"]
+            ["Proceed with decision", "Abort decision"],
         )
 
         if choice == "Abort decision":
@@ -206,14 +216,15 @@ if not st.session_state.decision_committed:
 
 # ================= POST-DECISION =================
 if st.session_state.decision is None:
-    st.error("No decision found. Please start again.")
-    if st.button("Restart"):
+    st.error("No decision found. Please restart.")
+    if st.button("Start new decision"):
         st.session_state.clear()
+        st.rerun()
     st.stop()
 
 st.success("Decision committed. Intelligence unlocked.")
 
-st.markdown("## What Changed Because of This Decision")
+st.markdown("## Decision Impact Overview")
 
 st.write(
     f"""
@@ -225,7 +236,8 @@ st.write(
 )
 
 st.info(
-    "All analytics, dashboards, and simulations now run **only in the context of this decision**."
+    "This is where advanced dashboards, simulations, and risk models plug in — "
+    "**all scoped strictly to this decision.**"
 )
 
 st.markdown("## Decisions You Have Made (and Avoided)")
@@ -234,4 +246,3 @@ for d in reversed(load_ledger()):
     st.write(
         f"- **{d['intent']} {d['asset']} ({d['magnitude']}%)** → {d['commitment']['action']}"
     )
-
