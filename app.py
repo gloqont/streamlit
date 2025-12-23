@@ -34,31 +34,22 @@ def load_demo_portfolio():
     total = df["Value"].sum()
     df["Weight (%)"] = (df["Value"] / total * 100).round(2)
 
-    pnl_pct = 0.6
-    pnl_val = round(total * pnl_pct / 100, 0)
+    return df, total
 
-    return df, total, pnl_pct, pnl_val
-
-portfolio, total_value, pnl_pct, pnl_val = load_demo_portfolio()
+portfolio, total_value = load_demo_portfolio()
 
 # ================= LANDING =================
 st.title("GLOQONT")
 st.caption("What happens to your portfolio if you do this?")
 
 st.markdown("""
-**GLOQONT is portfolio-aware decision intelligence.**  
-It does **not** predict prices. It reveals **consequences** before capital is committed.
+**Portfolio-aware decision intelligence.**  
+GLOQONT exposes *irreversible consequences* before capital is committed.
 """)
 
-# ================= PORTFOLIO VIEW =================
+# ================= PORTFOLIO =================
 st.markdown("## 💼 Portfolio Snapshot")
-
-st.metric(
-    "Total Portfolio Value",
-    f"${total_value:,.0f}",
-    f"+{pnl_pct}% (${pnl_val:,.0f})"
-)
-
+st.metric("Total Portfolio Value", f"${total_value:,.0f}")
 st.dataframe(portfolio, use_container_width=True)
 
 # ================= MODE =================
@@ -70,31 +61,25 @@ mode = st.radio(
 
 # ================= DECISION INPUT =================
 with st.form("decision"):
-    decision_type = st.selectbox(
-        "Decision Type",
-        ["Trade Decision", "Portfolio Reallocation", "Macro Event", "Shock Scenario"]
-    )
-
     decision_text = st.text_input(
         "What decision are you about to make?",
         placeholder="Buy NVDA +5%, Reduce India exposure, Fed hikes 50bps"
     )
-
     magnitude = st.slider("Decision Size / Intensity (%)", 1, 30, 5)
     submit = st.form_submit_button("Show Consequences")
 
-# ================= DECISION PARSER =================
+# ================= PARSER =================
 def analyze_decision(text):
-    text = text.lower()
-    for asset in portfolio["Asset"]:
-        if asset.lower() in text:
-            return asset
-    for region in portfolio["Region"].unique():
-        if region.lower() in text:
-            return region
-    if "crypto" in text or "btc" in text:
-        return "BTC"
-    return "Macro / Multi-Asset"
+    t = text.lower()
+    for a in portfolio["Asset"]:
+        if a.lower() in t:
+            return a, "asset"
+    for r in portfolio["Region"].unique():
+        if r.lower() in t:
+            return r, "macro"
+    if "fed" in t or "rate" in t:
+        return "Rates", "macro"
+    return "Multi-Asset", "macro"
 
 # ================= CONSEQUENCE ENGINE =================
 def consequence_engine(target, magnitude):
@@ -103,174 +88,113 @@ def consequence_engine(target, magnitude):
     elif target in portfolio["Region"].values:
         w = portfolio.loc[portfolio["Region"] == target, "Weight (%)"].sum()
     else:
-        w = 18.0  # macro default
+        w = 18.0
 
-    base_risk = w / 8
-    size_boost = 1 + magnitude / 18
-    risk_multiplier = base_risk * size_boost
-
-    worst = -risk_multiplier * 2.4
-    best = risk_multiplier * 1.2
-    expected = (worst + best) / 2
-
-    if "Reflexive" in mode:
-        break_time = max(2, int(35 / risk_multiplier))
-        unit = "minutes"
-    else:
-        break_time = max(5, int(55 / risk_multiplier))
-        unit = "months"
-
-    block = risk_multiplier > 6 or break_time <= 4
+    risk = (w / 8) * (1 + magnitude / 18)
 
     return {
         "weight": round(w, 2),
-        "worst": round(worst, 2),
-        "best": round(best, 2),
-        "expected": round(expected, 2),
-        "multiplier": round(risk_multiplier, 1),
-        "break_time": break_time,
-        "unit": unit,
-        "block": block
+        "multiplier": round(risk, 1),
+        "worst": round(-risk * 2.4, 2),
+        "best": round(risk * 1.2, 2),
+        "expected": round((-risk * 2.4 + risk * 1.2) / 2, 2),
+        "irreversible": risk > 4.5,
+        "time_loss": max(3, int(40 / risk)),
     }
 
 # ================= OUTPUT =================
 if submit and decision_text.strip():
 
-    target = analyze_decision(decision_text)
+    target, dtype = analyze_decision(decision_text)
     c = consequence_engine(target, magnitude)
 
     st.markdown("## 🔴 Decision Consequences")
 
-    # ---- Do Nothing Baseline ----
-    st.markdown("### 🟢 If You Do Nothing")
-    st.markdown("""
-    • Portfolio risk remains unchanged  
-    • Expected drift: **+0.6%**  
-    • No acceleration of downside  
-    """)
+    # -------- IRREVERSIBILITY FRAMING --------
+    st.markdown("### 🚨 What Cannot Be Undone")
 
-    # ---- Act ----
-    st.markdown("### 🔴 If You Execute This Decision")
-
-    if c["block"]:
-        st.error("🚫 DO NOT EXECUTE — downside accelerates beyond recovery control")
-    else:
-        st.warning("⚠️ Risk increases materially — execution requires discipline")
+    capital_loss = abs(c["worst"]) * total_value / 100
+    opportunity_loss = capital_loss * 0.6
 
     st.markdown(f"""
-    **Primary exposure impacted:** `{target}`  
-    **Portfolio weight affected:** **{c['weight']}%**
+    • **Permanent capital loss:** ~${capital_loss:,.0f}  
+    • **Time lost to recovery:** ~{c["time_loss"]} months  
+    • **Opportunity cost:** ~${opportunity_loss:,.0f}  
     """)
 
-    st.metric("Downside amplification", f"{c['multiplier']}×")
+    if c["irreversible"]:
+        st.error("This decision enters **irreversible territory**. Recovery depends on external luck, not skill.")
 
-    st.markdown("### 📊 Portfolio Impact Distribution")
+    # -------- COUNTERFACTUAL --------
+    st.markdown("### 🟢 Dominant Safer Alternative")
 
-    st.table(pd.DataFrame({
-        "Scenario": ["Worst Case", "Best Case"],
-        "Portfolio Change (%)": [c["worst"], c["best"]]
-    }))
-
-    st.markdown("### ⏱️ Time-to-Damage")
-    st.metric("Losses accelerate within", f"{c['break_time']} {c['unit']}")
-
-    # ---- Regime Sensitivity ----
-    st.markdown("### 🌪️ Fragile Under Market Regimes")
-    st.markdown("""
-    • Volatility expansion  
-    • Liquidity contraction  
-    • Correlation spikes  
+    st.success("""
+    **Instead:**  
+    Reduce position size by 50%  
+    Preserve optionality  
+    Maintain upside without left-tail acceleration  
     """)
 
-    # ---- Attribution ----
-    st.markdown("### 🧩 Risk Concentration Attribution")
-    attr = portfolio[["Asset", "Weight (%)"]].sort_values("Weight (%)", ascending=False)
-    st.dataframe(attr, use_container_width=True)
+    # -------- REGRET VISUALIZATION --------
+    st.markdown("### 🕰️ Regret Projection")
 
-    # ---- Bottom Line ----
-    st.markdown("### 🧠 Bottom Line")
-    if "Reflexive" in mode:
-        st.error("This decision compresses reaction time and magnifies losses faster than intervention.")
-    else:
-        st.error("This decision deepens drawdowns and extends recovery across cycles.")
+    st.warning(f"""
+    **6 months from now:**  
+    Portfolio value: **${total_value + capital_loss * -0.8:,.0f}**  
+    You realize this loss required **no urgency** — only restraint.
+    """)
 
-    # ---- Store Decision (schema-safe) ----
-    observed = round(c["expected"] * np.random.uniform(0.5, 1.4), 2)
+    # -------- STORE DECISION --------
+    observed = round(c["expected"] * np.random.uniform(0.6, 1.4), 2)
 
     st.session_state.decision_log.append({
         "time": now(),
         "decision": decision_text,
-        "target": target,
+        "type": dtype,
+        "mode": mode,
         "expected_pct": c["expected"],
         "observed_pct": observed,
+        "risk": c["multiplier"],
         "portfolio_value": total_value
     })
 
-# ================= DECISION REPLAY =================
-st.markdown("## 🔁 Decision Replay (Simulated Outcomes)")
+# ================= REPLAY =================
+st.markdown("## 🔁 Decision Replay")
 
 if st.session_state.decision_log:
     df = pd.DataFrame(st.session_state.decision_log)
 
-    # ---- HARD SCHEMA NORMALIZATION ----
-    REQUIRED_COLS = [
-        "time",
-        "decision",
-        "target",
-        "expected_pct",
-        "observed_pct",
-        "portfolio_value",
-    ]
-
-    for col in REQUIRED_COLS:
-        if col not in df.columns:
-            df[col] = np.nan
+    REQUIRED = ["time","decision","type","mode","expected_pct","observed_pct","risk","portfolio_value"]
+    for c in REQUIRED:
+        if c not in df.columns:
+            df[c] = np.nan
 
     df["Expected P&L ($)"] = (df["portfolio_value"] * df["expected_pct"] / 100).round(0)
     df["Observed P&L ($)"] = (df["portfolio_value"] * df["observed_pct"] / 100).round(0)
 
-    display_cols = [
-        "time",
-        "decision",
-        "target",
-        "Expected P&L ($)",
-        "Observed P&L ($)",
-    ]
-
-    st.caption("Observed outcomes are simulated for calibration illustration only.")
     st.dataframe(
-        df.reindex(columns=display_cols),
+        df.reindex(columns=["time","decision","type","Expected P&L ($)","Observed P&L ($)"]),
         use_container_width=True
     )
-else:
-    st.info("No decisions logged yet.")
 
-# ================= CALIBRATION SCORE =================
-st.markdown("## 🎯 Decision Calibration Score")
+# ================= DECISION PATHOLOGY =================
+st.markdown("## 🧠 Your Decision Patterns")
 
-if len(st.session_state.decision_log) >= 2:
+if len(st.session_state.decision_log) >= 3:
     df = pd.DataFrame(st.session_state.decision_log)
 
-    if {"expected_pct", "observed_pct"}.issubset(df.columns):
-        df = df.dropna(subset=["expected_pct", "observed_pct"])
+    insights = []
 
-        if len(df) >= 2:
-            df["error"] = abs(df["expected_pct"] - df["observed_pct"])
-            score = max(0, 100 - df["error"].mean() * 18)
+    if df[df["type"] == "macro"]["risk"].mean() > df[df["type"] == "asset"]["risk"].mean():
+        insights.append("You **underestimate downside in macro decisions**.")
 
-            st.metric("Judgment Calibration", f"{round(score, 0)} / 100")
+    if df[df["mode"].str.contains("Reflexive")]["risk"].mean() > 4:
+        insights.append("You **oversize trades in Reflexive mode**.")
 
-            st.markdown("""
-            **Interpretation**
-            - **80–100** → well-calibrated judgment  
-            - **60–80** → sizing / regime blind spots  
-            - **<60** → repeated consequence misjudgment  
-
-            Measures **decision quality**, not returns.
-            """)
-        else:
-            st.info("Calibration score appears after more decisions.")
+    if insights:
+        for i in insights:
+            st.error(i)
     else:
-        st.info("Calibration data not available yet.")
+        st.success("No dominant behavioral risks detected yet.")
 else:
-    st.info("Calibration score appears after multiple decisions.")
+    st.info("Decision pathology appears after more decisions.")
