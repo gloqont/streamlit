@@ -3,14 +3,14 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import random
-import json
-import os
+import re
 
 # ================= CONFIG =================
 st.set_page_config(page_title="GLOQONT", layout="centered")
 
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
+# ================= SESSION MEMORY =================
+if "decision_log" not in st.session_state:
+    st.session_state.decision_log = []
 
 # ================= HELPERS =================
 def now():
@@ -18,9 +18,6 @@ def now():
 
 def random_price(base, vol=0.05):
     return round(base * (1 + np.random.uniform(-vol, vol)), 2)
-
-def ledger_path(team):
-    return os.path.join(DATA_DIR, f"{team}_ledger.json")
 
 # ================= RANDOM PORTFOLIO =================
 @st.cache_data
@@ -60,29 +57,17 @@ def generate_portfolio():
 
 portfolio, total_value, pnl_pct, pnl_val = generate_portfolio()
 
-# ================= TEAM / USER =================
+# ================= LANDING =================
 st.title("GLOQONT")
-st.caption("Decision intelligence with memory")
+st.caption("What happens to your portfolio if you do this?")
 
-team = st.text_input("Team / Fund Name", value="DemoFund")
-member = st.text_input("Decision Maker", value="PM-1")
-
-# ================= LEDGER =================
-def load_ledger():
-    path = ledger_path(team)
-    if not os.path.exists(path):
-        return []
-    with open(path, "r") as f:
-        return json.load(f)
-
-def save_decision(d):
-    ledger = load_ledger()
-    ledger.append(d)
-    with open(ledger_path(team), "w") as f:
-        json.dump(ledger, f, indent=2)
+st.markdown("""
+**GLOQONT is portfolio-aware decision intelligence.**  
+Every answer is based on *your actual holdings*, not generic theory.
+""")
 
 # ================= PORTFOLIO VIEW =================
-st.markdown("## 💼 Portfolio Snapshot")
+st.markdown("## 💼 Your Portfolio (Live Snapshot)")
 
 st.metric(
     "Total Portfolio Value",
@@ -93,9 +78,13 @@ st.metric(
 st.dataframe(portfolio, use_container_width=True)
 
 # ================= MODE =================
-mode = st.radio("Operating Mode", ["Trader Mode", "Investor Mode"], horizontal=True)
+mode = st.radio(
+    "How do you operate?",
+    ["Trader Mode", "Investor Mode"],
+    horizontal=True
+)
 
-# ================= DECISION =================
+# ================= DECISION INPUT =================
 with st.form("decision"):
     decision_type = st.selectbox(
         "Decision Type",
@@ -104,104 +93,158 @@ with st.form("decision"):
 
     decision_text = st.text_input(
         "What are you about to do?",
-        placeholder="Buy NVDA +5%, Sell BTC, Reduce India exposure"
+        placeholder="Buy NVDA +5%, Sell BTC, Reduce India exposure, Fed hikes 50bps"
     )
 
     magnitude = st.slider("Decision size (%)", 1, 30, 5)
-    submit = st.form_submit_button("Analyze Decision")
+    submit = st.form_submit_button("Show Consequences")
 
-# ================= DECISION ANALYSIS =================
+# ================= DECISION PARSER =================
 def analyze_decision(text):
     text = text.lower()
     for asset in portfolio["Asset"]:
         if asset.lower() in text:
             return asset
-    for region in portfolio["Region"].unique():
-        if region.lower() in text:
-            return region
-    return "Macro"
+    if "india" in text:
+        return "India"
+    if "usa" in text or "us " in text:
+        return "USA"
+    if "crypto" in text or "btc" in text:
+        return "BTC"
+    return None
 
-def consequence_engine(hit, magnitude):
-    if hit in portfolio["Asset"].values:
-        w = portfolio.loc[portfolio["Asset"] == hit, "Weight (%)"].iloc[0]
-    elif hit in portfolio["Region"].values:
-        w = portfolio.loc[portfolio["Region"] == hit, "Weight (%)"].sum()
+# ================= CONSEQUENCE ENGINE =================
+def consequence_engine(asset_hit, magnitude):
+    if asset_hit in portfolio["Asset"].values:
+        w = portfolio.loc[portfolio["Asset"] == asset_hit, "Weight (%)"].iloc[0]
+    elif asset_hit in portfolio["Region"].values:
+        w = portfolio.loc[portfolio["Region"] == asset_hit, "Weight (%)"].sum()
     else:
         w = 15
 
     base_risk = w / 10
-    risk = base_risk * (1 + magnitude / 20)
+    size_boost = 1 + magnitude / 20
+    risk = base_risk * size_boost
+
+    worst = -risk * 2.5
+    best = risk * 1.3
+
+    if mode == "Trader Mode":
+        break_time = max(3, int(40 / risk))
+        unit = "minutes"
+    else:
+        break_time = max(7, int(50 / risk))
+        unit = "days"
+
+    auto_block = risk > 6 or break_time <= 5
 
     return {
-        "exposure": round(w, 2),
-        "risk_mult": round(risk, 2),
-        "worst": round(-risk * 2.5, 2),
-        "best": round(risk * 1.3, 2),
-        "break_time": int(40 / risk) if mode == "Trader Mode" else int(60 / risk),
-        "unit": "minutes" if mode == "Trader Mode" else "days",
+        "weight": round(w, 2),
+        "worst": round(worst, 2),
+        "best": round(best, 2),
+        "expected": round((worst + best) / 2, 2),
+        "multiplier": round(risk, 1),
+        "break_time": break_time,
+        "unit": unit,
+        "block": auto_block
     }
 
 # ================= OUTPUT =================
-if submit and decision_text:
+if submit and decision_text.strip():
 
     hit = analyze_decision(decision_text)
     c = consequence_engine(hit, magnitude)
 
     st.markdown("## 🔴 Decision Consequences")
 
-    st.metric("Portfolio exposure affected", f"{c['exposure']}%")
-    st.metric("How much worse losses become", f"{c['risk_mult']}×")
+    if c["block"]:
+        st.error("🚫 DO NOT TRADE THIS — downside accelerates beyond control")
+    else:
+        st.warning("⚠️ Elevated risk — proceed only with strict discipline")
+
+    st.markdown(f"""
+    **What you are impacting:** `{hit or 'Multiple assets / macro'}`  
+    **Portfolio exposure affected:** **{c['weight']}%**
+    """)
+
+    st.metric("How much worse losses become", f"{c['multiplier']}×")
+
+    st.markdown("### 📊 Portfolio Impact")
 
     st.table(pd.DataFrame({
         "Scenario": ["Worst case", "Best case"],
-        "Portfolio impact (%)": [c["worst"], c["best"]]
+        "Portfolio change (%)": [c["worst"], c["best"]]
     }))
 
-    st.metric("How fast things break", f"{c['break_time']} {c['unit']}")
+    st.markdown("### ⏱️ How fast things break")
 
-    # ================= SAVE DECISION =================
-    decision = {
+    st.metric("Damage accelerates in", f"{c['break_time']} {c['unit']}")
+
+    st.markdown("### 🧠 Explain it simply")
+
+    if mode == "Trader Mode":
+        st.success("If this goes wrong, losses stack up faster than you can fix them.")
+    else:
+        st.success("If this goes wrong, bad years become much harder to recover from.")
+
+    # ===== STORE DECISION FOR REPLAY =====
+    realized = round(c["expected"] * np.random.uniform(0.4, 1.6), 2)
+
+    st.session_state.decision_log.append({
         "time": now(),
-        "team": team,
-        "member": member,
         "decision": decision_text,
-        "hit": hit,
+        "asset": hit or "Macro",
         "mode": mode,
-        "portfolio_value": total_value,
-        "impact": c,
-    }
-    save_decision(decision)
+        "expected_pct": c["expected"],
+        "realized_pct": realized,
+        "portfolio_value": total_value
+    })
 
 # ================= LIVE P&L REPLAY =================
-st.markdown("## 🔁 Decision Replay & Learning")
+st.markdown("## 🔁 Live P&L Replay")
 
-ledger = load_ledger()
+if st.session_state.decision_log:
 
-if ledger:
-    df = pd.DataFrame(ledger)
-    df["Δ Portfolio ($)"] = total_value - df["portfolio_value"]
+    df = pd.DataFrame(st.session_state.decision_log)
+
+    df["Expected P&L ($)"] = (df["portfolio_value"] * df["expected_pct"] / 100).round(0)
+    df["Realized P&L ($)"] = (df["portfolio_value"] * df["realized_pct"] / 100).round(0)
 
     st.dataframe(
-        df[["time", "member", "decision", "hit", "mode", "Δ Portfolio ($)"]],
+        df[["time", "decision", "asset", "Expected P&L ($)", "Realized P&L ($)"]],
         use_container_width=True
     )
+
 else:
     st.info("No decisions yet.")
 
 # ================= SKILL SCORE =================
-st.markdown("## 🎯 Decision Skill Insights")
+st.markdown("## 🎯 Decision Skill Score")
 
-if ledger:
-    skill = {}
-    for d in ledger:
-        key = d["hit"]
-        skill.setdefault(key, []).append(abs(d["impact"]["worst"]))
+if len(st.session_state.decision_log) >= 2:
 
-    skill_df = pd.DataFrame(
-        [(k, round(100 - np.mean(v) * 5, 1)) for k, v in skill.items()],
-        columns=["Asset / Region", "Skill Score (0–100)"]
+    df = pd.DataFrame(st.session_state.decision_log)
+    df["error"] = abs(df["expected_pct"] - df["realized_pct"])
+
+    skill = (
+        df.groupby("asset")["error"]
+        .mean()
+        .apply(lambda x: max(0, 100 - x * 20))
+        .round(0)
+        .reset_index()
+        .rename(columns={"error": "Skill Score"})
     )
 
-    st.bar_chart(skill_df.set_index("Asset / Region"))
+    st.dataframe(skill, use_container_width=True)
+
+    st.markdown("""
+    **How to read this:**  
+    - **80–100** → well-calibrated judgment  
+    - **60–80** → sizing / timing issues  
+    - **<60** → repeated misjudgment  
+
+    This measures **decision accuracy**, not returns.
+    """)
+
 else:
-    st.info("Skill scores will appear after decisions.")
+    st.info("Skill scores appear after multiple decisions.")
