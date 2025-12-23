@@ -47,7 +47,7 @@ st.caption("What happens to your portfolio if you do this?")
 
 st.markdown("""
 **GLOQONT is portfolio-aware decision intelligence.**  
-It does not predict prices. It exposes **consequences** before capital is committed.
+It does **not** predict prices. It reveals **consequences** before capital is committed.
 """)
 
 # ================= PORTFOLIO VIEW =================
@@ -172,7 +172,6 @@ if submit and decision_text.strip():
     }))
 
     st.markdown("### ⏱️ Time-to-Damage")
-
     st.metric("Losses accelerate within", f"{c['break_time']} {c['unit']}")
 
     # ---- Regime Sensitivity ----
@@ -180,32 +179,22 @@ if submit and decision_text.strip():
     st.markdown("""
     • Volatility expansion  
     • Liquidity contraction  
-    • Cross-asset correlation spikes  
+    • Correlation spikes  
     """)
 
     # ---- Attribution ----
     st.markdown("### 🧩 Risk Concentration Attribution")
+    attr = portfolio[["Asset", "Weight (%)"]].sort_values("Weight (%)", ascending=False)
+    st.dataframe(attr, use_container_width=True)
 
-    attribution = portfolio.copy()
-    attribution["Risk Contribution"] = (
-        attribution["Weight (%)"] / attribution["Weight (%)"].sum()
-    )
-    attribution = attribution.sort_values("Risk Contribution", ascending=False)
-
-    st.dataframe(
-        attribution[["Asset", "Risk Contribution"]].head(5),
-        use_container_width=True
-    )
-
-    # ---- Scary Sentence ----
+    # ---- Bottom Line ----
     st.markdown("### 🧠 Bottom Line")
-
     if "Reflexive" in mode:
         st.error("This decision compresses reaction time and magnifies losses faster than intervention.")
     else:
-        st.error("This decision deepens drawdowns and extends recovery time across market cycles.")
+        st.error("This decision deepens drawdowns and extends recovery across cycles.")
 
-    # ---- Store Decision ----
+    # ---- Store Decision (schema-safe) ----
     observed = round(c["expected"] * np.random.uniform(0.5, 1.4), 2)
 
     st.session_state.decision_log.append({
@@ -217,11 +206,20 @@ if submit and decision_text.strip():
         "portfolio_value": total_value
     })
 
-# ================= DECISION HISTORY =================
+# ================= DECISION REPLAY =================
 st.markdown("## 🔁 Decision Replay (Simulated Outcomes)")
 
 if st.session_state.decision_log:
     df = pd.DataFrame(st.session_state.decision_log)
+
+    # ---- SCHEMA NORMALIZATION (CRITICAL FIX) ----
+    if "expected_pct" not in df.columns:
+        df["expected_pct"] = np.nan
+    if "observed_pct" not in df.columns:
+        df["observed_pct"] = np.nan
+    if "portfolio_value" not in df.columns:
+        df["portfolio_value"] = total_value
+
     df["Expected P&L ($)"] = (df["portfolio_value"] * df["expected_pct"] / 100).round(0)
     df["Observed P&L ($)"] = (df["portfolio_value"] * df["observed_pct"] / 100).round(0)
 
@@ -233,24 +231,32 @@ if st.session_state.decision_log:
 else:
     st.info("No decisions logged yet.")
 
-# ================= DECISION CALIBRATION =================
+# ================= CALIBRATION SCORE =================
 st.markdown("## 🎯 Decision Calibration Score")
 
 if len(st.session_state.decision_log) >= 2:
     df = pd.DataFrame(st.session_state.decision_log)
-    df["error"] = abs(df["expected_pct"] - df["observed_pct"])
 
-    score = max(0, 100 - df["error"].mean() * 18)
+    if {"expected_pct", "observed_pct"}.issubset(df.columns):
+        df = df.dropna(subset=["expected_pct", "observed_pct"])
 
-    st.metric("Judgment Calibration", f"{round(score, 0)} / 100")
+        if len(df) >= 2:
+            df["error"] = abs(df["expected_pct"] - df["observed_pct"])
+            score = max(0, 100 - df["error"].mean() * 18)
 
-    st.markdown("""
-    **How to interpret this score:**
-    - **80–100** → well-calibrated risk intuition  
-    - **60–80** → sizing or regime blind spots  
-    - **<60** → repeated consequence misjudgment  
+            st.metric("Judgment Calibration", f"{round(score, 0)} / 100")
 
-    This measures **decision quality**, not returns.
-    """)
+            st.markdown("""
+            **Interpretation**
+            - **80–100** → well-calibrated judgment  
+            - **60–80** → sizing / regime blind spots  
+            - **<60** → repeated consequence misjudgment  
+
+            Measures **decision quality**, not returns.
+            """)
+        else:
+            st.info("Calibration score appears after more decisions.")
+    else:
+        st.info("Calibration data not available yet.")
 else:
     st.info("Calibration score appears after multiple decisions.")
