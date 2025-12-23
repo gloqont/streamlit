@@ -1,240 +1,198 @@
 import streamlit as st
 import numpy as np
 import pandas as pd
-import json
-import os
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ================= CONFIG =================
-st.set_page_config(
-    page_title="GLOQONT — Decision Intelligence",
-    layout="centered"
-)
+st.set_page_config(page_title="GLOQONT — Decision Consequences", layout="centered")
 
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# ================= UTILITIES =================
+# ================= HELPERS =================
 def now():
-    return datetime.utcnow().isoformat()
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-def user_file(user_id):
-    return os.path.join(DATA_DIR, f"{user_id}_ledger.json")
+# ================= CORE CONSEQUENCE ENGINE =================
+def consequence_engine(decision_type, decision_text, magnitude):
+    """
+    Consequences scale based on:
+    - decision type
+    - magnitude
+    - whether decision sounds concentrated, macro, or risky
+    """
 
-def safe_get(d, k, default=None):
-    return d[k] if k in d else default
+    text = decision_text.lower()
 
-# ================= USER SYSTEM =================
-st.title("GLOQONT")
-st.caption("Decision → Consequence → Memory")
+    concentration_boost = 1.4 if any(x in text for x in ["nvda", "single", "one", "all in"]) else 1.0
+    macro_boost = 1.6 if decision_type in ["Macro Event", "Shock Scenario"] else 1.0
+    size_boost = 1 + magnitude / 20
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
+    risk_multiplier = concentration_boost * macro_boost * size_boost
 
-if not st.session_state.user_id:
-    st.markdown("### Identify yourself")
-    user = st.text_input("User ID / Email (demo-safe)", placeholder="investor@fund.com")
-    if st.button("Enter"):
-        st.session_state.user_id = user.strip().lower()
-        st.rerun()
-    st.stop()
+    base_vol = 1.2  # %
+    p5 = -base_vol * risk_multiplier * 2.2
+    p50 = base_vol * (1 / risk_multiplier)
+    p95 = base_vol * risk_multiplier * 1.3
 
-USER_ID = st.session_state.user_id
+    drawdown = abs(p5) * 1.4
 
-# ================= LEDGER =================
-def load_ledger():
-    path = user_file(USER_ID)
-    if not os.path.exists(path):
-        return []
-    with open(path, "r") as f:
-        ledger = json.load(f)
+    attribution = {
+        "Target asset exposure": round(55 * concentration_boost, 1),
+        "Correlation increase": round(30 * macro_boost, 1),
+        "Liquidity loss": round(15 * size_boost, 1),
+    }
 
-    # --- schema hardening ---
-    for d in ledger:
-        d.setdefault("type", "Decision")
-        d.setdefault("outcome", "pending")
-        d.setdefault("realized_return", None)
-        d.setdefault("quality_score", None)
+    regime = {
+        "Risk-On": {"do_nothing": 0.8, "act": p95},
+        "Risk-Off": {"do_nothing": -1.1, "act": p5},
+    }
 
-    return ledger
+    liquidity_flag = "⚠️ Harder to exit quickly" if magnitude > 10 else "✓ Liquidity stable"
 
-def save_ledger(ledger):
-    with open(user_file(USER_ID), "w") as f:
-        json.dump(ledger, f, indent=2)
+    kid_explanation = (
+        f"If things go bad, you lose money **faster than before**.\n\n"
+        f"Before, falling hurt a little.\n"
+        f"After this decision, falling hurts **a lot more**."
+    )
 
-def append_decision(d):
-    ledger = load_ledger()
-    ledger.append(d)
-    save_ledger(ledger)
-
-# ================= CORE ENGINE =================
-def simulate_distribution(vol, magnitude, n=5000):
-    shock = magnitude / 100
-    rets = np.random.normal(0, vol * (1 + shock), n)
-    return np.percentile(rets, [5, 50, 95])
-
-def regime_matrix(vol, magnitude):
-    shock = magnitude / 100
     return {
-        "Risk-On": (vol * 0.6, vol * 0.6 * (1 + shock)),
-        "Risk-Off": (vol * 1.2, vol * 1.2 * (1 + shock * 2)),
-        "Vol Spike": (vol * 1.6, vol * 1.6 * (1 + shock * 3)),
+        "distribution": (p5, p50, p95),
+        "drawdown": drawdown,
+        "attribution": attribution,
+        "regime": regime,
+        "liquidity": liquidity_flag,
+        "kid": kid_explanation,
+        "multiplier": round(abs(p5) / base_vol, 1),
     }
 
-def score_decision(expected, realized):
-    if realized is None:
-        return None
-    error = abs(realized - expected)
-    if error < 0.01:
-        return 95
-    if error < 0.03:
-        return 80
-    if error < 0.06:
-        return 60
-    return 30
+# ================= UI =================
+st.title("GLOQONT")
+st.caption("What happens to your money if you do this?")
 
-# ================= DECISION CREATION =================
-st.markdown("## 1️⃣ Define the Decision")
+st.markdown("""
+Before money moves, GLOQONT shows **what gets worse**.
+Not predictions. **Consequences.**
+""")
 
-with st.form("decision_form"):
-    d_type = st.selectbox(
+# ================= DECISION INPUT =================
+with st.form("decision"):
+    decision_type = st.selectbox(
         "Decision Type",
-        ["Trade", "Portfolio Action", "Macro Event", "Shock Scenario"]
+        ["Trade Decision", "Portfolio Action", "Macro Event", "Shock Scenario"]
     )
 
-    intent = st.text_input(
-        "Decision",
-        placeholder="Buy NVDA +5%, Reduce equity −10%, Fed hikes 50bps"
+    decision_text = st.text_input(
+        "What are you about to do?",
+        placeholder="Buy NVDA +5%, Reduce equities −10%, Fed hikes 50bps"
     )
 
-    magnitude = st.slider("Impact magnitude (%)", 1, 50, 10)
-    horizon = st.selectbox("Horizon", ["7 days", "30 days", "90 days"])
+    magnitude = st.slider("How big is this decision (%)", 1, 30, 5)
 
-    submit = st.form_submit_button("Simulate Consequences")
+    submitted = st.form_submit_button("Show Consequences")
 
-if submit:
-    decision = {
-        "id": str(uuid4()),
-        "timestamp": now(),
-        "type": d_type,
-        "intent": intent,
-        "magnitude": magnitude,
-        "horizon": horizon,
-    }
+# ================= CONSEQUENCE OUTPUT =================
+if submitted and decision_text.strip():
 
-    # ===== Portfolio Context =====
-    portfolio = [
-        {"asset": "AAPL", "weight": 30, "class": "Equity"},
-        {"asset": "MSFT", "weight": 25, "class": "Equity"},
-        {"asset": "BTC", "weight": 15, "class": "Crypto"},
-        {"asset": "Cash", "weight": 30, "class": "Cash"},
-    ]
+    c = consequence_engine(decision_type, decision_text, magnitude)
 
-    equity_weight = sum(p["weight"] for p in portfolio if p["class"] == "Equity")
-    base_vol = 0.012 + equity_weight / 2000
+    st.markdown("## 🔴 What this decision does to your portfolio")
 
-    p5, p50, p95 = simulate_distribution(base_vol, magnitude)
-    regimes = regime_matrix(base_vol, magnitude)
-
-    decision["expected"] = {
-        "p5": p5,
-        "median": p50,
-        "p95": p95,
-        "regimes": regimes,
-    }
-
-    decision["summary"] = {
-        "left_tail_multiplier": round(abs(p5) / base_vol, 2),
-        "expected_return": round(p50 * 100, 2),
-        "recovery_days": int(15 + magnitude * 2),
-    }
-
-    decision["outcome"] = "committed"
-    append_decision(decision)
-    st.success("Decision recorded. Memory updated.")
-
-# ================= DECISION MEMORY =================
-st.markdown("## 2️⃣ Decision Memory")
-
-ledger = load_ledger()
-
-if not ledger:
-    st.info("No decisions yet.")
-    st.stop()
-
-df = pd.DataFrame([
-    {
-        "Time": d["timestamp"][:19],
-        "Decision": d["intent"],
-        "Expected %": d["summary"]["expected_return"],
-        "Realized %": d["realized_return"],
-        "Quality": d["quality_score"],
-    }
-    for d in ledger
-])
-
-st.dataframe(df, use_container_width=True)
-
-# ================= OUTCOME UPDATE =================
-st.markdown("## 3️⃣ Record Realized Outcome")
-
-pending = [d for d in ledger if d["realized_return"] is None]
-
-if pending:
-    d_map = {d["id"]: d for d in pending}
-    sel = st.selectbox(
-        "Select decision",
-        options=list(d_map.keys()),
-        format_func=lambda x: d_map[x]["intent"]
+    st.error(
+        f"""
+        **Big picture:**  
+        This decision makes bad outcomes **{c['multiplier']}× worse** when markets turn against you.
+        """
     )
 
-    realized = st.number_input("Realized return (%)", -50.0, 50.0, 0.0)
+    # -------- P&L DISTRIBUTION --------
+    st.markdown("### 📊 Portfolio Outcomes (Next 30 Days)")
 
-    if st.button("Update Outcome"):
-        d = d_map[sel]
-        d["realized_return"] = realized
-        d["quality_score"] = score_decision(
-            d["summary"]["expected_return"] / 100,
-            realized / 100
-        )
-        save_ledger(ledger)
-        st.success("Outcome recorded. Decision quality updated.")
-        st.rerun()
-else:
-    st.info("All decisions have realized outcomes.")
+    dist_df = pd.DataFrame({
+        "Scenario": ["Worst case", "Typical", "Best case"],
+        "Portfolio change (%)": [
+            round(c["distribution"][0], 2),
+            round(c["distribution"][1], 2),
+            round(c["distribution"][2], 2),
+        ]
+    })
 
-# ================= INSIGHT =================
-st.markdown("## 4️⃣ Decision Quality Intelligence")
+    st.table(dist_df)
 
-scored = [d for d in ledger if d["quality_score"] is not None]
+    # -------- WORST CASE --------
+    st.markdown("### 💥 Worst-Case Damage")
 
-if scored:
-    avg_quality = int(np.mean([d["quality_score"] for d in scored]))
-    st.metric("Average Decision Quality", f"{avg_quality}/100")
+    st.warning(
+        f"""
+        If things go wrong, your portfolio can fall **{round(c['drawdown'],2)}%**
+        before you can recover.
+        """
+    )
+
+    # -------- ATTRIBUTION --------
+    st.markdown("### 🧩 What causes the damage")
+
+    attr_df = pd.DataFrame.from_dict(
+        c["attribution"], orient="index", columns=["% of total downside"]
+    )
+
+    st.bar_chart(attr_df)
+
+    # -------- CORRELATION --------
+    st.markdown("### 🔗 Correlation Breakage")
+
+    st.info(
+        """
+        Assets that usually move separately now **fall together**.
+        Diversification protects you less when you need it most.
+        """
+    )
+
+    # -------- LIQUIDITY --------
+    st.markdown("### 💧 Liquidity Stress")
+
+    st.write(c["liquidity"])
+
+    # -------- REGIME --------
+    st.markdown("### 🌧️ What happens in different markets")
+
+    regime_df = pd.DataFrame([
+        ["Markets calm", c["regime"]["Risk-On"]["do_nothing"], c["regime"]["Risk-On"]["act"]],
+        ["Markets panic", c["regime"]["Risk-Off"]["do_nothing"], c["regime"]["Risk-Off"]["act"]],
+    ], columns=["Market mood", "Do nothing (%)", "If you act (%)"])
+
+    st.table(regime_df)
+
+    # -------- KID EXPLANATION --------
+    st.markdown("### 🧠 Explain it to a 10-year-old")
+
+    st.success(c["kid"])
+
+    # -------- DO NOTHING VS ACT --------
+    st.markdown("## ⚖️ Do Nothing vs Act")
+
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown("### 🟦 Do Nothing")
+        st.markdown("""
+        - Portfolio stays balanced  
+        - Losses grow slowly  
+        - You have time to react  
+        - Diversification still helps  
+        """)
+
+    with right:
+        st.markdown("### 🟥 Act on this decision")
+        st.markdown(f"""
+        - Bigger swings up **and down**  
+        - Losses grow faster  
+        - Assets move together  
+        - Recovery takes longer  
+        """)
 
     st.markdown(
-        """
-        **Interpretation**
-        - >80: Decisions are well-calibrated
-        - 60–80: Risk understood, timing noisy
-        - <60: Systematic misjudgment detected
+        f"""
+        ⚠️ **Simple truth:**  
+        Doing nothing keeps risk **manageable**.  
+        Acting makes mistakes **hurt faster**.
         """
     )
-else:
-    st.info("No scored decisions yet.")
-
-# ================= FINAL MESSAGE =================
-st.markdown("---")
-st.markdown(
-    """
-    **GLOQONT is not a prediction tool.**
-
-    It is a **decision memory system** that:
-    - Exposes downside before action
-    - Records intent, assumptions, and outcomes
-    - Learns where judgment breaks
-
-    This is how capital allocation becomes accountable.
-    """
-)
