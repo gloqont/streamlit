@@ -6,14 +6,9 @@ import re
 import os
 import ast
 import yfinance as yf
-from difflib import get_close_matches
-
-
 
 ANALYTICS_FILE = "analytics_events.csv"
-
 FOUNDER_EMAIL = "dgosa1437@gmail.com"
-
 
 # ================= CONFIG =================
 st.set_page_config(page_title="GLOQONT", layout="centered")
@@ -35,6 +30,10 @@ if "simulation_count" not in st.session_state:
     st.session_state.simulation_count = 0
 if "session_start" not in st.session_state:
     st.session_state.session_start = datetime.utcnow()
+if "pending_symbol" not in st.session_state:
+    st.session_state.pending_symbol = None
+if "pending_price" not in st.session_state:
+    st.session_state.pending_price = None
 
 # ================= ANALYTICS LOGGING =================
 def log_event(event_type, data=None):
@@ -46,12 +45,10 @@ def log_event(event_type, data=None):
         "data": data or {}
     }
 
-    # ---- Session log (still useful) ----
     if "event_log" not in st.session_state:
         st.session_state.event_log = []
     st.session_state.event_log.append(log_entry)
 
-    # ---- Global persistent log ----
     df = pd.DataFrame([{
         "timestamp": timestamp,
         "user_email": st.session_state.user_email,
@@ -64,46 +61,58 @@ def log_event(event_type, data=None):
     else:
         df.to_csv(ANALYTICS_FILE, index=False)
 
-
 # ================= HELPERS =================
 def now():
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
 def validate_email(email):
-    """Basic email validation"""
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-@st.cache_data(ttl=24 * 3600)  # cache for 24 hours
+@st.cache_data(ttl=24 * 3600)
 def resolve_equity_symbol(user_input, country):
     """
-    Attempts to resolve a user-typed equity name or ticker
-    using Yahoo Finance. Returns up to 3 suggestions.
+    Auto-adds .NS for Indian stocks, resolves symbols via Yahoo Finance
     """
-
     query = user_input.strip().upper()
-
     candidates = []
 
     try:
-        # 1️⃣ Try exact ticker first
-        ticker = yf.Ticker(query)
-        hist = ticker.history(period="1d")
+        # Auto-add .NS for Indian stocks
+        if country == "India" and not query.endswith(".NS"):
+            query_variants = [query, f"{query}.NS"]
+        else:
+            query_variants = [query]
 
-        if not hist.empty:
-            info = ticker.fast_info
-            candidates.append({
-                "symbol": query,
-                "name": info.get("shortName", query),
-                "price": float(hist["Close"].iloc[-1])
-            })
-            return candidates
+        # Try each variant
+        for variant in query_variants:
+            try:
+                ticker = yf.Ticker(variant)
+                hist = ticker.history(period="1d")
 
-        # 2️⃣ Try company name search (fallback)
+                if not hist.empty:
+                    info = ticker.fast_info
+                    candidates.append({
+                        "symbol": variant,
+                        "name": info.get("shortName", variant),
+                        "price": float(hist["Close"].iloc[-1])
+                    })
+                    
+                    # If we found a match, return immediately
+                    if candidates:
+                        return candidates
+            except:
+                continue
+
+        # Fallback: Search by name
         search = yf.Search(user_input, max_results=5)
         for item in search.quotes[:3]:
             symbol = item.get("symbol")
             name = item.get("shortname") or item.get("longname")
+
+            # Auto-add .NS for Indian companies
+            if country == "India" and not symbol.endswith(".NS") and not any(x in symbol for x in [".", "-"]):
+                symbol = f"{symbol}.NS"
 
             t = yf.Ticker(symbol)
             h = t.history(period="1d")
@@ -119,8 +128,6 @@ def resolve_equity_symbol(user_input, country):
         pass
 
     return candidates
-
-
 
 # ================= AUTHENTICATION SCREEN =================
 def show_login():
@@ -158,7 +165,6 @@ def show_login():
                     st.session_state.user_name = name
                     st.session_state.session_start = datetime.utcnow()
                     
-                    # Log signup event
                     log_event("user_signup", {
                         "email": email,
                         "name": name
@@ -176,119 +182,108 @@ def show_portfolio_entry():
 
     st.info("""
     **📝 How to enter your portfolio:**
-    - Type the asset name or ticker (e.g. Apple, AAPL, Reliance)
-    - Confirm the suggested equity (for accuracy)
+    - Type the asset name or ticker (e.g., Apple, AAPL, Reliance, TCS)
+    - For Indian stocks: We automatically add .NS suffix
+    - Confirm the suggested equity for accuracy
     - Quantity is mandatory
     """)
 
     if "portfolio_entries" not in st.session_state:
         st.session_state.portfolio_entries = []
 
-    # ---------------- FORM ----------------
-    with st.form("portfolio_form", clear_on_submit=True):
-        st.markdown("#### Add Position")
+    # ---- SYMBOL RESOLUTION (OUTSIDE FORM) ----
+    st.markdown("#### 🔍 Step 1: Search for Asset")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        asset_input = st.text_input(
+            "Asset / Company name*",
+            placeholder="e.g., Apple, AAPL, Reliance, TCS"
+        )
+    with col2:
+        region = st.selectbox(
+            "Region*",
+            ["USA", "India", "Europe", "Asia", "Global", "Other"]
+        )
 
-        col1, col2 = st.columns(2)
+    # Show suggestions if user typed something
+    if asset_input:
+        suggestions = resolve_equity_symbol(asset_input, region)
 
-        with col1:
-            asset_input = st.text_input(
-                "Asset / Company name*",
-                placeholder="e.g., Apple, AAPL, Reliance"
-            )
+        if suggestions:
+            st.markdown("**Did you mean:**")
+            for idx, s in enumerate(suggestions):
+                if st.button(
+                    f"✓ Use {s['symbol']} — {s['name']} (Last close: ${s['price']:.2f})",
+                    key=f"select_{s['symbol']}_{idx}"
+                ):
+                    st.session_state.pending_symbol = s["symbol"]
+                    st.session_state.pending_price = s["price"]
+                    
+                    log_event("symbol_resolved", {
+                        "input": asset_input,
+                        "resolved_symbol": s["symbol"]
+                    })
+                    
+                    st.success(f"✅ Selected: {s['symbol']}")
+                    st.rerun()
+        else:
+            st.warning("⚠️ No matching equity found. Try refining the name.")
 
-        with col2:
-            quantity = st.number_input(
-                "Quantity*",
-                min_value=0.0001,
-                value=1.0,
-                step=0.1,
-                format="%.4f"
-            )
+    # ---- ADD POSITION FORM ----
+    if st.session_state.pending_symbol:
+        st.markdown("---")
+        st.markdown("#### ➕ Step 2: Add Position to Portfolio")
+        
+        st.info(f"**Selected:** {st.session_state.pending_symbol} @ ${st.session_state.pending_price:.2f}")
 
-        col3, col4 = st.columns(2)
-
-        with col3:
-            region = st.selectbox(
-                "Region*",
-                ["USA", "India", "Europe", "Asia", "Global", "Other"]
-            )
-
-        with col4:
-            asset_class = st.selectbox(
-                "Asset Class*",
-                ["Equity", "Crypto", "Bonds", "Commodities", "Real Estate", "Cash", "Other"]
-            )
-
-        # ---------- SYMBOL RESOLUTION ----------
-        resolved_symbol = None
-        resolved_price = None
-
-        if asset_input and asset_class == "Equity":
-            suggestions = resolve_equity_symbol(asset_input, region)
-
-            if suggestions:
-                st.markdown("**Did you mean:**")
-                for s in suggestions:
-                    if st.button(
-                        f"Use {s['symbol']} — {s['name']} (Last close: ${s['price']:.2f})",
-                        key=f"use_{s['symbol']}"
-                    ):
-                        resolved_symbol = s["symbol"]
-                        resolved_price = s["price"]
-
-                        # STEP 5 — LOG SYMBOL RESOLUTION (EXACT LOCATION)
-                        log_event("symbol_resolved", {
-                            "input": asset_input,
-                            "resolved_symbol": resolved_symbol
-                        })
-            else:
-                st.warning("No matching equity found. Please refine the name.")
-
-        add_position = st.form_submit_button("➕ Add Position", use_container_width=True)
-
-        # ---------- ADD POSITION ----------
-        if add_position:
-            if not asset_input:
-                st.error("Asset name is required.")
-                return
-
-            if asset_class == "Equity":
-                if not resolved_symbol:
-                    st.error("Please confirm the equity from suggestions.")
-                    return
-
-                asset_name = resolved_symbol
-                price = resolved_price
-
-            else:
-                asset_name = asset_input.upper().strip()
-                price = st.number_input(
-                    "Price (USD)",
-                    min_value=0.01,
-                    value=100.0
+        with st.form("add_position_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                quantity = st.number_input(
+                    "Quantity*",
+                    min_value=0.0001,
+                    value=1.0,
+                    step=0.1,
+                    format="%.4f"
+                )
+            
+            with col2:
+                asset_class = st.selectbox(
+                    "Asset Class*",
+                    ["Equity", "Crypto", "Bonds", "Commodities", "Real Estate", "Cash", "Other"]
                 )
 
-            new_entry = {
-                "Asset": asset_name,
-                "Region": region,
-                "Class": asset_class,
-                "Quantity": quantity,
-                "Price": price
-            }
+            add_position = st.form_submit_button("➕ Add to Portfolio", use_container_width=True)
 
-            st.session_state.portfolio_entries.append(new_entry)
+            if add_position:
+                new_entry = {
+                    "Asset": st.session_state.pending_symbol,
+                    "Region": region,
+                    "Class": asset_class,
+                    "Quantity": quantity,
+                    "Price": st.session_state.pending_price
+                }
 
-            # STEP 5 — LOG POSITION ADD
-            log_event("position_added", {
-                "asset": asset_name,
-                "asset_class": asset_class,
-                "quantity": quantity,
-                "price_source": "yfinance_last_close" if asset_class == "Equity" else "manual"
-            })
+                st.session_state.portfolio_entries.append(new_entry)
 
-            st.success(f"✅ Added {asset_name}")
+                log_event("position_added", {
+                    "asset": st.session_state.pending_symbol,
+                    "asset_class": asset_class,
+                    "quantity": quantity,
+                    "price_source": "yfinance_last_close"
+                })
 
-    # ---------------- PORTFOLIO PREVIEW ----------------
+                st.success(f"✅ Added {st.session_state.pending_symbol} to portfolio!")
+                
+                # Reset pending
+                st.session_state.pending_symbol = None
+                st.session_state.pending_price = None
+                
+                st.rerun()
+
+    # ---- PORTFOLIO PREVIEW ----
     if st.session_state.portfolio_entries:
         st.markdown("---")
         st.markdown("#### 📊 Your Portfolio Preview")
@@ -298,43 +293,49 @@ def show_portfolio_entry():
         total = df["Value"].sum()
         df["Weight (%)"] = (df["Value"] / total * 100).round(2)
 
-        st.dataframe(df, use_container_width=True)
+        # Display with delete option
+        for idx, row in df.iterrows():
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                st.text(f"{row['Asset']} | {row['Region']} | {row['Class']} | "
+                       f"Qty: {row['Quantity']:.4f} @ ${row['Price']:.2f} = ${row['Value']:,.2f} ({row['Weight (%)']:.1f}%)")
+            with col2:
+                if st.button("🗑️", key=f"delete_{idx}"):
+                    st.session_state.portfolio_entries.pop(idx)
+                    st.rerun()
 
-        if st.button("✅ Confirm Portfolio & Start Analysis", type="primary"):
+        st.markdown(f"**💰 Total Portfolio Value: ${total:,.2f}**")
+
+        # Confirm button
+        if st.button("✅ Confirm Portfolio & Start Analysis", type="primary", use_container_width=True):
             if len(df) < 2:
-                st.error("Please add at least 2 positions.")
-                return
+                st.error("❌ Please add at least 2 positions.")
+            else:
+                st.session_state.user_portfolio = df
+                st.session_state.portfolio_entered = True
 
-            st.session_state.user_portfolio = df
-            st.session_state.portfolio_entered = True
+                log_event("portfolio_confirmed", {
+                    "num_positions": len(df),
+                    "total_value": float(total),
+                    "time_spent_seconds": (datetime.utcnow() - st.session_state.session_start).seconds
+                })
 
-            log_event("portfolio_confirmed", {
-                "num_positions": len(df),
-                "total_value": float(total),
-                "time_spent_seconds": (datetime.utcnow() - st.session_state.session_start).seconds
-            })
-
-            st.success("Portfolio saved.")
-            st.rerun()
-
+                st.success("🎉 Portfolio saved! Redirecting...")
+                st.rerun()
     else:
-        st.warning("👆 Add your first position above to get started")
-
+        st.warning("👆 Search and select an asset above to start building your portfolio")
 
 # ================= DECISION ANALYSIS SCREEN =================
 def show_analysis():
     portfolio = st.session_state.user_portfolio
     total_value = portfolio["Value"].sum()
     
-    # Calculate P&L (simulated for demo)
     pnl_pct = 0.6
     pnl_val = round(total_value * pnl_pct / 100, 0)
     
-    # Header
     st.title("GLOQONT")
     st.caption("What happens to your portfolio if you do this?")
     
-    # User info and portfolio summary
     col1, col2 = st.columns([3, 1])
     with col1:
         st.markdown(f"**User:** {st.session_state.user_name} | **Email:** {st.session_state.user_email}")
@@ -345,7 +346,6 @@ def show_analysis():
     
     st.markdown("---")
     
-    # Portfolio snapshot
     st.markdown("## 💼 Your Portfolio Snapshot")
     
     col1, col2, col3 = st.columns(3)
@@ -361,14 +361,12 @@ def show_analysis():
     
     st.markdown("---")
     
-    # Mode selection
     mode = st.radio(
         "Decision Context",
         ["Reflexive Mode (short-term, convex risk)", "Compounding Mode (long-term, drawdown risk)"],
         horizontal=True
     )
     
-    # Decision input
     with st.form("decision"):
         st.markdown("## 🎯 Test Your Decision")
         
@@ -388,9 +386,7 @@ def show_analysis():
         
         submit = st.form_submit_button("🔍 Show Consequences", type="primary", use_container_width=True)
     
-    # Analysis logic
     if submit and decision_text.strip():
-        # Log simulation event
         st.session_state.simulation_count += 1
         log_event("simulation_run", {
             "decision": decision_text,
@@ -399,14 +395,11 @@ def show_analysis():
             "simulation_number": st.session_state.simulation_count
         })
         
-        # Parse decision
         target = analyze_decision(decision_text, portfolio)
         c = consequence_engine(target, magnitude, portfolio, total_value, mode)
         
-        # Display results
         show_consequences(target, c, portfolio, total_value, decision_text, mode)
         
-        # Log results viewed
         log_event("results_viewed", {
             "target": target,
             "risk_multiplier": c["multiplier"],
@@ -417,17 +410,14 @@ def show_analysis():
 def analyze_decision(text, portfolio):
     text = text.lower()
     
-    # Check for assets
     for asset in portfolio["Asset"]:
         if asset.lower() in text:
             return asset
     
-    # Check for regions
     for region in portfolio["Region"].unique():
         if region.lower() in text:
             return region
     
-    # Check for asset classes
     for asset_class in portfolio["Class"].unique():
         if asset_class.lower() in text:
             return asset_class
@@ -436,7 +426,6 @@ def analyze_decision(text, portfolio):
 
 # ================= CONSEQUENCE ENGINE =================
 def consequence_engine(target, magnitude, portfolio, total_value, mode):
-    # Calculate weight affected
     if target in portfolio["Asset"].values:
         w = portfolio.loc[portfolio["Asset"] == target, "Weight (%)"].iloc[0]
     elif target in portfolio["Region"].values:
@@ -444,19 +433,16 @@ def consequence_engine(target, magnitude, portfolio, total_value, mode):
     elif target in portfolio["Class"].values:
         w = portfolio.loc[portfolio["Class"] == target, "Weight (%)"].sum()
     else:
-        w = 18.0  # Default for macro
+        w = 18.0
     
-    # Risk calculation
     base_risk = w / 8
     size_boost = 1 + magnitude / 18
     risk_multiplier = base_risk * size_boost
     
-    # Impact scenarios
     worst = -risk_multiplier * 2.4
     best = risk_multiplier * 1.2
     expected = (worst + best) / 2
     
-    # Time dynamics
     if "Reflexive" in mode:
         break_time = max(2, int(35 / risk_multiplier))
         unit = "minutes"
@@ -464,7 +450,6 @@ def consequence_engine(target, magnitude, portfolio, total_value, mode):
         break_time = max(5, int(55 / risk_multiplier))
         unit = "months"
     
-    # Risk flag
     block = risk_multiplier > 6 or break_time <= 4
     
     return {
@@ -482,7 +467,6 @@ def consequence_engine(target, magnitude, portfolio, total_value, mode):
 def show_consequences(target, c, portfolio, total_value, decision_text, mode):
     st.markdown("## 🔴 Decision Consequences")
     
-    # Do nothing scenario
     st.markdown("### 🟢 If You Do Nothing")
     st.markdown(
         "• Portfolio risk remains unchanged\n"
@@ -490,7 +474,6 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
         "• No acceleration of downside"
     )
     
-    # Execute scenario
     st.markdown("### 🔴 If You Execute This Decision")
     
     if c["block"]:
@@ -505,18 +488,15 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
     
     st.metric("Downside Amplification", f"{c['multiplier']}×")
     
-    # Impact distribution
     st.markdown("### 📊 Portfolio Impact Distribution")
     st.table(pd.DataFrame({
         "Scenario": ["Worst Case", "Best Case", "Expected"],
         "Portfolio Change (%)": [c["worst"], c["best"], c["expected"]]
     }))
     
-    # Time to damage
     st.markdown("### ⏱️ Time-to-Damage")
     st.metric("Losses accelerate within", f"{c['break_time']} {c['unit']}")
     
-    # Market regime fragility
     st.markdown("### 🌪️ Fragile Under Market Regimes")
     st.markdown(
         "• Volatility expansion\n"
@@ -524,14 +504,12 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
         "• Correlation spikes"
     )
     
-    # Risk concentration
     st.markdown("### 🧩 Risk Concentration Attribution")
     st.dataframe(
         portfolio[["Asset", "Weight (%)"]].sort_values("Weight (%)", ascending=False),
         use_container_width=True
     )
     
-    # Irreversibility check
     st.markdown("### 🚨 Irreversibility Check")
     
     capital_loss = abs(c["worst"]) * total_value / 100
@@ -544,13 +522,9 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
         f"• Opportunity cost: ~${opportunity_loss:,.0f}"
     )
     
-    # Irreversible loss heatmap
     show_irreversible_heatmap(c)
-    
-    # Portfolio-level exposure
     show_portfolio_exposure(c, portfolio, total_value)
     
-    # Session log
     observed = round(c["expected"] * np.random.uniform(0.5, 1.4), 2)
     st.session_state.decision_log.append({
         "time": now(),
@@ -561,7 +535,6 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
         "portfolio_value": total_value
     })
     
-    # Feedback section
     st.markdown("---")
     st.markdown("### 💬 Was This Analysis Helpful?")
     
@@ -592,11 +565,11 @@ def show_irreversible_heatmap(c):
         for j, t in enumerate(time_horizon):
             score = cap * (j + 1) * c["multiplier"]
             if score < 40:
-                heatmap[i, j] = 1  # recoverable
+                heatmap[i, j] = 1
             elif score < 75:
-                heatmap[i, j] = 2  # delayed
+                heatmap[i, j] = 2
             else:
-                heatmap[i, j] = 3  # unrecoverable
+                heatmap[i, j] = 3
     
     heatmap_df = pd.DataFrame(
         heatmap,
@@ -627,23 +600,19 @@ def show_portfolio_exposure(c, portfolio, total_value):
     
     IRREVERSIBLE_THRESHOLD = 4.5
     
-    # Classify assets
     equity_mask = portfolio["Class"] == "Equity"
     macro_mask = portfolio["Region"] != "USA"
     liquidity_mask = portfolio["Class"].isin(["Crypto"])
     
-    # Base exposure
     base_multiplier = 3.0
     base_irrev = portfolio["Weight (%)"][portfolio["Weight (%)"] * base_multiplier > IRREVERSIBLE_THRESHOLD].sum()
     
-    # Decision exposure
     decision_irrev = 0.0
     if c["multiplier"] > IRREVERSIBLE_THRESHOLD:
         decision_irrev = c["weight"]
     
     total_irrev_after = min(100.0, base_irrev + decision_irrev)
     
-    # Category breakdowns
     equity_irrev = portfolio.loc[
         equity_mask & (portfolio["Weight (%)"] * c["multiplier"] > IRREVERSIBLE_THRESHOLD),
         "Weight (%)"
@@ -659,7 +628,6 @@ def show_portfolio_exposure(c, portfolio, total_value):
         "Weight (%)"
     ].sum()
     
-    # Display
     st.markdown(
         f"This decision increases irreversible exposure from "
         f"**{base_irrev:.0f}% → {total_irrev_after:.0f}%** of the portfolio under stress."
@@ -676,7 +644,8 @@ def show_portfolio_exposure(c, portfolio, total_value):
             "⚠️ A material portion of the portfolio has entered a structurally fragile state. "
             "Recovery now depends on favorable external conditions, not decision quality."
         )
-    
+
+# ================= FOUNDER ANALYTICS =================
 def show_founder_analytics():
     st.markdown("## 🧠 Founder Analytics (Internal Only)")
 
@@ -690,72 +659,9 @@ def show_founder_analytics():
         st.info("No analytics data yet.")
         return
 
-    # -------------------------
-    # BASIC METRICS
-    # -------------------------
     signups = df[df["event"] == "user_signup"]["user_email"].nunique()
     activations = df[df["event"] == "portfolio_confirmed"]["user_email"].nunique()
-
     activation_rate = (activations / signups * 100) if signups > 0 else 0
-        # -------------------------
-    # TIME-SERIES VIEWS
-    # -------------------------
-    st.markdown("## 📈 Time-Series Trends")
-
-    df_ts = df.copy()
-    df_ts["date"] = pd.to_datetime(df_ts["timestamp"]).dt.date
-
-
-    # Daily Signups
-    signups_ts = (
-        df_ts[df_ts["event"] == "user_signup"]
-        .groupby("date")["user_email"]
-        .nunique()
-    )
-
-    if not signups_ts.empty:
-        st.markdown("### Daily Signups")
-        st.line_chart(signups_ts)
-
-    # Daily Activations
-    activations_ts = (
-        df_ts[df_ts["event"] == "portfolio_confirmed"]
-        .groupby("date")["user_email"]
-        .nunique()
-    )
-
-    if not activations_ts.empty:
-        st.markdown("### Daily Portfolio Activations")
-        st.line_chart(activations_ts)
-
-    # Activation Rate Over Time
-    if not signups_ts.empty and not activations_ts.empty:
-        combined = pd.concat(
-            [signups_ts, activations_ts],
-            axis=1,
-            keys=["signups", "activations"]
-        ).fillna(0)
-
-        combined["activation_rate_pct"] = (
-            combined["activations"]
-            / combined["signups"].replace(0, np.nan)
-            * 100
-        )
-
-        st.markdown("### Activation Rate Over Time (%)")
-        st.line_chart(combined["activation_rate_pct"])
-
-    # Daily Simulations Volume
-    simulations_ts = (
-        df_ts[df_ts["event"] == "simulation_run"]
-        .groupby("date")
-        .size()
-    )
-
-    if not simulations_ts.empty:
-        st.markdown("### Daily Simulations Run")
-        st.line_chart(simulations_ts)
-
 
     st.markdown("### 📌 Core Metrics")
     col1, col2, col3 = st.columns(3)
@@ -763,69 +669,26 @@ def show_founder_analytics():
     col2.metric("Activated Users", activations)
     col3.metric("Activation Rate", f"{activation_rate:.1f}%")
 
-    # -------------------------
-    # FUNNEL VISUAL
-    # -------------------------
     st.markdown("### 🔻 Signup → Activation Funnel")
-
     funnel_df = pd.DataFrame({
         "Stage": ["Signed Up", "Portfolio Confirmed"],
         "Users": [signups, activations]
     })
-
     st.bar_chart(funnel_df.set_index("Stage"))
 
-    # -------------------------
-    # SIMULATIONS PER USER
-    # -------------------------
     sims = df[df["event"] == "simulation_run"]
     if not sims.empty:
         sims_per_user = sims.groupby("user_email").size()
-
         st.markdown("### 🔁 Simulations per User")
         st.bar_chart(sims_per_user)
-
         st.metric("Avg Simulations / User", f"{sims_per_user.mean():.2f}")
 
-    # -------------------------
-    # FEEDBACK SENTIMENT
-    # -------------------------
     feedback = df[df["event"].str.startswith("feedback")]
     if not feedback.empty:
         sentiment = feedback["event"].value_counts().rename_axis("Sentiment").reset_index(name="Count")
-
         st.markdown("### 💬 Feedback Sentiment")
         st.bar_chart(sentiment.set_index("Sentiment"))
 
-        with st.expander("Who clicked what"):
-            st.dataframe(feedback[["user_email", "event", "timestamp"]])
-
-    # -------------------------
-    # STAY TIME DISTRIBUTION
-    # -------------------------
-    portfolio_events = df[df["event"] == "portfolio_confirmed"]
-
-    def extract_time(val):
-        try:
-            parsed = ast.literal_eval(val)
-            return parsed.get("time_spent_seconds", 0)
-        except Exception:
-            return 0
-
-    if not portfolio_events.empty:
-        portfolio_events["stay_seconds"] = portfolio_events["data"].apply(extract_time)
-
-        st.markdown("### ⏱️ Time Spent Before Activation (seconds)")
-        st.bar_chart(portfolio_events["stay_seconds"])
-
-        st.metric(
-            "Median Time to Portfolio Entry",
-            f"{portfolio_events['stay_seconds'].median():.0f} sec"
-        )
-
-    # -------------------------
-    # RAW EXPORT (FOR YOU)
-    # -------------------------
     st.markdown("### 📁 Raw Analytics Data")
     st.download_button(
         "Download analytics_events.csv",
@@ -833,10 +696,8 @@ def show_founder_analytics():
         file_name="analytics_events.csv"
     )
 
-
 # ================= MAIN APP LOGIC =================
 def main():
-    # Founder analytics (sidebar only)
     if st.session_state.user_email == FOUNDER_EMAIL:
         show_founder_analytics()
 
@@ -847,10 +708,5 @@ def main():
     else:
         show_analysis()
 
-
 if __name__ == "__main__":
-    main() 
-
-
-
-
+    main()
