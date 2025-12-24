@@ -6,6 +6,8 @@ import re
 import os
 import ast
 import yfinance as yf
+import feedparser
+import random
 
 ANALYTICS_FILE = "analytics_events.csv"
 FOUNDER_EMAIL = "dgosa1437@gmail.com"
@@ -70,6 +72,45 @@ def validate_email(email):
     return re.match(pattern, email) is not None
 
 @st.cache_data(ttl=24 * 3600)
+def fetch_market_news():
+    feed_url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US"
+    feed = feedparser.parse(feed_url)
+
+    headlines = []
+    for entry in feed.entries[:8]:
+        headlines.append(entry.title)
+
+    return headlines
+
+def classify_headline_sentiment(headline):
+    negative_words = ["falls", "drops", "declines", "cuts", "slows", "crisis", "risk", "volatility", "plunge", "crash", "down"]
+    positive_words = ["rises", "beats", "growth", "surges", "expands", "strong", "optimism", "rally", "gains", "up"]
+
+    h = headline.lower()
+
+    if any(w in h for w in negative_words):
+        return "Negative"
+    if any(w in h for w in positive_words):
+        return "Positive"
+    return "Neutral"
+
+def pick_market_headlines():
+    headlines = fetch_market_news()
+
+    if not headlines:
+        return []
+
+    selected = random.sample(headlines, min(2, len(headlines)))
+
+    return [
+        {
+            "title": h,
+            "sentiment": classify_headline_sentiment(h)
+        }
+        for h in selected
+    ]
+
+@st.cache_data(ttl=24 * 3600)
 def resolve_equity_symbol(user_input, country):
     """
     Auto-adds .NS for Indian stocks, resolves symbols via Yahoo Finance
@@ -128,6 +169,44 @@ def resolve_equity_symbol(user_input, country):
         pass
 
     return candidates
+
+@st.cache_data(ttl=24 * 3600)
+def get_live_price(symbol):
+    """Fetch yesterday's closing price from Yahoo Finance"""
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="5d")
+        if not hist.empty:
+            return float(hist["Close"].iloc[-1])
+    except:
+        pass
+    return None
+
+def load_demo_portfolio_with_live_prices():
+    """Load demo portfolio with real yesterday prices from Yahoo Finance"""
+    demo_tickers = [
+        ("AAPL", "USA", "Equity", 120),
+        ("MSFT", "USA", "Equity", 80),
+        ("NVDA", "USA", "Equity", 40),
+        ("ASML", "Europe", "Equity", 25),
+        ("RELIANCE.NS", "India", "Equity", 90),
+        ("TCS.NS", "India", "Equity", 60),
+        ("BTC-USD", "Global", "Crypto", 1.2),
+    ]
+    
+    entries = []
+    for ticker, region, asset_class, quantity in demo_tickers:
+        price = get_live_price(ticker)
+        if price:
+            entries.append({
+                "Asset": ticker,
+                "Region": region,
+                "Class": asset_class,
+                "Quantity": quantity,
+                "Price": price
+            })
+    
+    return entries
 
 # ================= AUTHENTICATION SCREEN =================
 def show_login():
@@ -325,6 +404,27 @@ def show_portfolio_entry():
     else:
         st.warning("👆 Search and select an asset above to start building your portfolio")
 
+    # ---- DEMO PORTFOLIO OPTION ----
+    st.markdown("---")
+    st.markdown("### 🎮 Or Try With Demo Portfolio")
+    st.info("Load a sample portfolio with real market prices (updated daily)")
+    
+    if st.button("📊 Load Demo Portfolio with Live Prices", use_container_width=True):
+        with st.spinner("Fetching live market prices..."):
+            demo_entries = load_demo_portfolio_with_live_prices()
+            
+            if demo_entries:
+                st.session_state.portfolio_entries = demo_entries
+                
+                log_event("demo_portfolio_loaded", {
+                    "num_positions": len(demo_entries)
+                })
+                
+                st.success("✅ Demo portfolio loaded with live prices!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to load demo portfolio. Please try manually adding positions.")
+
 # ================= DECISION ANALYSIS SCREEN =================
 def show_analysis():
     portfolio = st.session_state.user_portfolio
@@ -466,6 +566,23 @@ def consequence_engine(target, magnitude, portfolio, total_value, mode):
 # ================= CONSEQUENCES DISPLAY =================
 def show_consequences(target, c, portfolio, total_value, decision_text, mode):
     st.markdown("## 🔴 Decision Consequences")
+    
+    # ================= MARKET CONTEXT =================
+    st.markdown("### 📰 Market Context (Last 24h)")
+
+    news_items = pick_market_headlines()
+
+    for n in news_items:
+        if n["sentiment"] == "Negative":
+            st.error(f"🔻 {n['title']}")
+        elif n["sentiment"] == "Positive":
+            st.success(f"🔺 {n['title']}")
+        else:
+            st.info(f"ℹ️ {n['title']}")
+
+    st.caption("Market news is provided for context only, not as a recommendation.")
+    
+    st.markdown("---")
     
     st.markdown("### 🟢 If You Do Nothing")
     st.markdown(
@@ -696,7 +813,9 @@ def show_founder_analytics():
         file_name="analytics_events.csv"
     )
 
-# ================= MAIN APP LOGIC =================
+
+# main logic
+
 def main():
     if st.session_state.user_email == FOUNDER_EMAIL:
         show_founder_analytics()
@@ -708,5 +827,8 @@ def main():
     else:
         show_analysis()
 
+
 if __name__ == "__main__":
     main()
+
+
