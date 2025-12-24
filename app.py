@@ -5,6 +5,9 @@ from datetime import datetime
 import re
 import os
 import ast
+import yfinance as yf
+from difflib import get_close_matches
+
 
 
 ANALYTICS_FILE = "analytics_events.csv"
@@ -71,6 +74,53 @@ def validate_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
+@st.cache_data(ttl=24 * 3600)  # cache for 24 hours
+def resolve_equity_symbol(user_input, country):
+    """
+    Attempts to resolve a user-typed equity name or ticker
+    using Yahoo Finance. Returns up to 3 suggestions.
+    """
+
+    query = user_input.strip().upper()
+
+    candidates = []
+
+    try:
+        # 1️⃣ Try exact ticker first
+        ticker = yf.Ticker(query)
+        hist = ticker.history(period="1d")
+
+        if not hist.empty:
+            info = ticker.fast_info
+            candidates.append({
+                "symbol": query,
+                "name": info.get("shortName", query),
+                "price": float(hist["Close"].iloc[-1])
+            })
+            return candidates
+
+        # 2️⃣ Try company name search (fallback)
+        search = yf.Search(user_input, max_results=5)
+        for item in search.quotes[:3]:
+            symbol = item.get("symbol")
+            name = item.get("shortname") or item.get("longname")
+
+            t = yf.Ticker(symbol)
+            h = t.history(period="1d")
+
+            if not h.empty:
+                candidates.append({
+                    "symbol": symbol,
+                    "name": name,
+                    "price": float(h["Close"].iloc[-1])
+                })
+
+    except Exception:
+        pass
+
+    return candidates
+
+
 
 # ================= AUTHENTICATION SCREEN =================
 def show_login():
@@ -123,149 +173,153 @@ def show_login():
 def show_portfolio_entry():
     st.title(f"Welcome, {st.session_state.user_name}! 👋")
     st.markdown("### Enter Your Portfolio")
-    
+
     st.info("""
     **📝 How to enter your portfolio:**
-    - Add each position (stocks, crypto, etc.)
-    - Specify quantity and current price
-    - We'll calculate the portfolio weights automatically
+    - Type the asset name or ticker (e.g. Apple, AAPL, Reliance)
+    - Confirm the suggested equity (for accuracy)
+    - Quantity is mandatory
     """)
-    
-    # Initialize portfolio entries in session state
+
     if "portfolio_entries" not in st.session_state:
         st.session_state.portfolio_entries = []
-    
-    # Portfolio entry form
+
+    # ---------------- FORM ----------------
     with st.form("portfolio_form", clear_on_submit=True):
         st.markdown("#### Add Position")
-        
-        col1, col2, col3 = st.columns(3)
-        
+
+        col1, col2 = st.columns(2)
+
         with col1:
-            asset_ticker = st.text_input(
-                "Asset/Ticker*", 
-                placeholder="e.g., AAPL, BTC, RELIANCE.NS",
-                help="Enter stock ticker, crypto symbol, or asset name"
+            asset_input = st.text_input(
+                "Asset / Company name*",
+                placeholder="e.g., Apple, AAPL, Reliance"
             )
-        
+
         with col2:
             quantity = st.number_input(
-                "Quantity*", 
+                "Quantity*",
                 min_value=0.0001,
                 value=1.0,
                 step=0.1,
-                format="%.4f",
-                help="Number of units you own"
+                format="%.4f"
             )
-        
+
+        col3, col4 = st.columns(2)
+
         with col3:
-            price = st.number_input(
-                "Current Price (USD)*", 
-                min_value=0.01,
-                value=100.0,
-                step=0.01,
-                help="Current market price per unit"
-            )
-        
-        col4, col5 = st.columns(2)
-        
-        with col4:
             region = st.selectbox(
                 "Region*",
-                ["USA", "India", "Europe", "Asia", "Global", "Other"],
-                help="Geographic region or market"
+                ["USA", "India", "Europe", "Asia", "Global", "Other"]
             )
-        
-        with col5:
+
+        with col4:
             asset_class = st.selectbox(
                 "Asset Class*",
-                ["Equity", "Crypto", "Bonds", "Commodities", "Real Estate", "Cash", "Other"],
-                help="Type of asset"
+                ["Equity", "Crypto", "Bonds", "Commodities", "Real Estate", "Cash", "Other"]
             )
-        
-        add_position = st.form_submit_button("➕ Add Position", use_container_width=True)
-        
-        if add_position:
-            if not asset_ticker:
-                st.error("Asset/Ticker is required")
+
+        # ---------- SYMBOL RESOLUTION ----------
+        resolved_symbol = None
+        resolved_price = None
+
+        if asset_input and asset_class == "Equity":
+            suggestions = resolve_equity_symbol(asset_input, region)
+
+            if suggestions:
+                st.markdown("**Did you mean:**")
+                for s in suggestions:
+                    if st.button(
+                        f"Use {s['symbol']} — {s['name']} (Last close: ${s['price']:.2f})",
+                        key=f"use_{s['symbol']}"
+                    ):
+                        resolved_symbol = s["symbol"]
+                        resolved_price = s["price"]
+
+                        # STEP 5 — LOG SYMBOL RESOLUTION (EXACT LOCATION)
+                        log_event("symbol_resolved", {
+                            "input": asset_input,
+                            "resolved_symbol": resolved_symbol
+                        })
             else:
-                new_entry = {
-                    "Asset": asset_ticker.upper().strip(),
-                    "Region": region,
-                    "Class": asset_class,
-                    "Quantity": quantity,
-                    "Price": price
-                }
-                st.session_state.portfolio_entries.append(new_entry)
-                st.success(f"✅ Added {asset_ticker.upper()}")
-                
-                # Log position added
-                log_event("position_added", {
-                    "asset": asset_ticker.upper(),
-                    "value": quantity * price
-                })
-    
-    # Display current portfolio
+                st.warning("No matching equity found. Please refine the name.")
+
+        add_position = st.form_submit_button("➕ Add Position", use_container_width=True)
+
+        # ---------- ADD POSITION ----------
+        if add_position:
+            if not asset_input:
+                st.error("Asset name is required.")
+                return
+
+            if asset_class == "Equity":
+                if not resolved_symbol:
+                    st.error("Please confirm the equity from suggestions.")
+                    return
+
+                asset_name = resolved_symbol
+                price = resolved_price
+
+            else:
+                asset_name = asset_input.upper().strip()
+                price = st.number_input(
+                    "Price (USD)",
+                    min_value=0.01,
+                    value=100.0
+                )
+
+            new_entry = {
+                "Asset": asset_name,
+                "Region": region,
+                "Class": asset_class,
+                "Quantity": quantity,
+                "Price": price
+            }
+
+            st.session_state.portfolio_entries.append(new_entry)
+
+            # STEP 5 — LOG POSITION ADD
+            log_event("position_added", {
+                "asset": asset_name,
+                "asset_class": asset_class,
+                "quantity": quantity,
+                "price_source": "yfinance_last_close" if asset_class == "Equity" else "manual"
+            })
+
+            st.success(f"✅ Added {asset_name}")
+
+    # ---------------- PORTFOLIO PREVIEW ----------------
     if st.session_state.portfolio_entries:
         st.markdown("---")
         st.markdown("#### 📊 Your Portfolio Preview")
-        
-        # Create DataFrame
+
         df = pd.DataFrame(st.session_state.portfolio_entries)
         df["Value"] = df["Quantity"] * df["Price"]
         total = df["Value"].sum()
         df["Weight (%)"] = (df["Value"] / total * 100).round(2)
-        
-        # Display with option to remove
-        for idx, row in df.iterrows():
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.text(f"{row['Asset']} | {row['Region']} | {row['Class']} | "
-                       f"Qty: {row['Quantity']:.4f} | Price: ${row['Price']:.2f} | "
-                       f"Value: ${row['Value']:,.2f} ({row['Weight (%)']:.2f}%)")
-            with col2:
-                if st.button("🗑️", key=f"remove_{idx}"):
-                    st.session_state.portfolio_entries.pop(idx)
-                    st.rerun()
-        
-        st.markdown(f"**Total Portfolio Value: ${total:,.2f}**")
-        
-        # Confirm portfolio button
-        if st.button("✅ Confirm Portfolio & Start Analysis", type="primary", use_container_width=True):
-            if len(st.session_state.portfolio_entries) < 2:
-                st.error("Please add at least 2 positions to analyze portfolio impact")
-            else:
-                st.session_state.user_portfolio = df
-                st.session_state.portfolio_entered = True
-                
-                # Log portfolio confirmation
-                log_event("portfolio_confirmed", {
-                    "num_positions": len(df),
-                    "total_value": float(total),
-                    "time_spent_seconds": (datetime.utcnow() - st.session_state.session_start).seconds
-                })
-                
-                st.success("🎉 Portfolio saved! Redirecting to analysis...")
-                st.rerun()
-    
+
+        st.dataframe(df, use_container_width=True)
+
+        if st.button("✅ Confirm Portfolio & Start Analysis", type="primary"):
+            if len(df) < 2:
+                st.error("Please add at least 2 positions.")
+                return
+
+            st.session_state.user_portfolio = df
+            st.session_state.portfolio_entered = True
+
+            log_event("portfolio_confirmed", {
+                "num_positions": len(df),
+                "total_value": float(total),
+                "time_spent_seconds": (datetime.utcnow() - st.session_state.session_start).seconds
+            })
+
+            st.success("Portfolio saved.")
+            st.rerun()
+
     else:
         st.warning("👆 Add your first position above to get started")
-        
-        # Option to use demo portfolio
-        st.markdown("---")
-        if st.button("🎮 Or Try With Demo Portfolio First"):
-            demo_entries = [
-                {"Asset": "AAPL", "Region": "USA", "Class": "Equity", "Quantity": 120, "Price": 190},
-                {"Asset": "MSFT", "Region": "USA", "Class": "Equity", "Quantity": 80, "Price": 420},
-                {"Asset": "NVDA", "Region": "USA", "Class": "Equity", "Quantity": 40, "Price": 1150},
-                {"Asset": "RELIANCE.NS", "Region": "India", "Class": "Equity", "Quantity": 90, "Price": 2900},
-                {"Asset": "BTC", "Region": "Global", "Class": "Crypto", "Quantity": 1.2, "Price": 65000},
-            ]
-            st.session_state.portfolio_entries = demo_entries
-            
-            # Log demo usage
-            log_event("demo_portfolio_selected")
-            st.rerun()
+
 
 # ================= DECISION ANALYSIS SCREEN =================
 def show_analysis():
