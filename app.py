@@ -10,6 +10,10 @@ import ast
 ANALYTICS_FILE = "analytics_events.csv"
 
 FOUNDER_EMAIL = "dgosa1437@gmail.com"
+def to_date(df):
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+    return df
 
 # ================= CONFIG =================
 st.set_page_config(page_title="GLOQONT", layout="centered")
@@ -622,64 +626,159 @@ def show_portfolio_exposure(c, portfolio, total_value):
         )
 
 def show_founder_analytics():
-    st.sidebar.markdown("## 🧠 Founder Analytics")
+    st.markdown("## 🧠 Founder Analytics (Internal Only)")
 
     if not os.path.exists(ANALYTICS_FILE):
-        st.sidebar.info("No analytics data yet.")
+        st.info("No analytics data yet.")
         return
 
     df = pd.read_csv(ANALYTICS_FILE)
 
+    if df.empty:
+        st.info("No analytics data yet.")
+        return
 
-    # --- BASIC COUNTS ---
+    # -------------------------
+    # BASIC METRICS
+    # -------------------------
     signups = df[df["event"] == "user_signup"]["user_email"].nunique()
-    portfolio_confirms = df[df["event"] == "portfolio_confirmed"]["user_email"].nunique()
-    simulations = df[df["event"] == "simulation_run"]
+    activations = df[df["event"] == "portfolio_confirmed"]["user_email"].nunique()
 
-    activation_rate = (
-        portfolio_confirms / signups * 100 if signups > 0 else 0
+    activation_rate = (activations / signups * 100) if signups > 0 else 0
+        # -------------------------
+    # TIME-SERIES VIEWS
+    # -------------------------
+    st.markdown("## 📈 Time-Series Trends")
+
+    df_ts = add_date_column(df)
+
+    # Daily Signups
+    signups_ts = (
+        df_ts[df_ts["event"] == "user_signup"]
+        .groupby("date")["user_email"]
+        .nunique()
     )
 
-    st.sidebar.metric("Signups", signups)
-    st.sidebar.metric("Portfolio Confirmed", portfolio_confirms)
-    st.sidebar.metric("Activation Rate", f"{activation_rate:.1f}%")
+    if not signups_ts.empty:
+        st.markdown("### Daily Signups")
+        st.line_chart(signups_ts)
 
-    # --- SIMULATIONS PER USER ---
-    if not simulations.empty:
-        sims_per_user = simulations.groupby("user_email").size()
-        st.sidebar.metric(
-            "Avg Simulations / User",
-            f"{sims_per_user.mean():.2f}"
+    # Daily Activations
+    activations_ts = (
+        df_ts[df_ts["event"] == "portfolio_confirmed"]
+        .groupby("date")["user_email"]
+        .nunique()
+    )
+
+    if not activations_ts.empty:
+        st.markdown("### Daily Portfolio Activations")
+        st.line_chart(activations_ts)
+
+    # Activation Rate Over Time
+    if not signups_ts.empty and not activations_ts.empty:
+        combined = pd.concat(
+            [signups_ts, activations_ts],
+            axis=1,
+            keys=["signups", "activations"]
+        ).fillna(0)
+
+        combined["activation_rate_pct"] = (
+            combined["activations"]
+            / combined["signups"].replace(0, np.nan)
+            * 100
         )
 
-    # --- FEEDBACK SENTIMENT ---
+        st.markdown("### Activation Rate Over Time (%)")
+        st.line_chart(combined["activation_rate_pct"])
+
+    # Daily Simulations Volume
+    simulations_ts = (
+        df_ts[df_ts["event"] == "simulation_run"]
+        .groupby("date")
+        .size()
+    )
+
+    if not simulations_ts.empty:
+        st.markdown("### Daily Simulations Run")
+        st.line_chart(simulations_ts)
+
+
+    st.markdown("### 📌 Core Metrics")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Signups", signups)
+    col2.metric("Activated Users", activations)
+    col3.metric("Activation Rate", f"{activation_rate:.1f}%")
+
+    # -------------------------
+    # FUNNEL VISUAL
+    # -------------------------
+    st.markdown("### 🔻 Signup → Activation Funnel")
+
+    funnel_df = pd.DataFrame({
+        "Stage": ["Signed Up", "Portfolio Confirmed"],
+        "Users": [signups, activations]
+    })
+
+    st.bar_chart(funnel_df.set_index("Stage"))
+
+    # -------------------------
+    # SIMULATIONS PER USER
+    # -------------------------
+    sims = df[df["event"] == "simulation_run"]
+    if not sims.empty:
+        sims_per_user = sims.groupby("user_email").size()
+
+        st.markdown("### 🔁 Simulations per User")
+        st.bar_chart(sims_per_user)
+
+        st.metric("Avg Simulations / User", f"{sims_per_user.mean():.2f}")
+
+    # -------------------------
+    # FEEDBACK SENTIMENT
+    # -------------------------
     feedback = df[df["event"].str.startswith("feedback")]
     if not feedback.empty:
-        sentiment_counts = feedback["event"].value_counts()
-        st.sidebar.markdown("### Feedback Sentiment")
-        st.sidebar.write(sentiment_counts)
+        sentiment = feedback["event"].value_counts().rename_axis("Sentiment").reset_index(name="Count")
 
-    # --- STAY TIME ---
+        st.markdown("### 💬 Feedback Sentiment")
+        st.bar_chart(sentiment.set_index("Sentiment"))
+
+        with st.expander("Who clicked what"):
+            st.dataframe(feedback[["user_email", "event", "timestamp"]])
+
+    # -------------------------
+    # STAY TIME DISTRIBUTION
+    # -------------------------
     portfolio_events = df[df["event"] == "portfolio_confirmed"]
-    if not portfolio_events.empty:
-        def extract_time_spent(val):
-            try:
-                if isinstance(val, dict):
-                    return val.get("time_spent_seconds", 0)
-                if isinstance(val, str):
-                    parsed = ast.literal_eval(val)
-                    return parsed.get("time_spent_seconds", 0)
-            except Exception:
-                return 0
+
+    def extract_time(val):
+        try:
+            parsed = ast.literal_eval(val)
+            return parsed.get("time_spent_seconds", 0)
+        except Exception:
             return 0
 
-        avg_stay = portfolio_events["data"].apply(extract_time_spent).mean()
+    if not portfolio_events.empty:
+        portfolio_events["stay_seconds"] = portfolio_events["data"].apply(extract_time)
 
-        st.sidebar.metric("Avg Stay Time (sec)", f"{avg_stay:.0f}")
+        st.markdown("### ⏱️ Time Spent Before Activation (seconds)")
+        st.bar_chart(portfolio_events["stay_seconds"])
 
-    # --- RAW EVENT LOG (YOU ONLY) ---
-    with st.sidebar.expander("🔍 Raw Event Log"):
-        st.sidebar.dataframe(df)
+        st.metric(
+            "Median Time to Portfolio Entry",
+            f"{portfolio_events['stay_seconds'].median():.0f} sec"
+        )
+
+    # -------------------------
+    # RAW EXPORT (FOR YOU)
+    # -------------------------
+    st.markdown("### 📁 Raw Analytics Data")
+    st.download_button(
+        "Download analytics_events.csv",
+        df.to_csv(index=False),
+        file_name="analytics_events.csv"
+    )
+
 
 # ================= MAIN APP LOGIC =================
 def main():
