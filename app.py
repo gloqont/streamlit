@@ -745,14 +745,17 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
     st.caption("Market news is provided for context only, not as a recommendation.")
 
     # ================= TRANSMISSION GRAPH =================
+        # ================= TRANSMISSION GRAPH =================
     if target == "Macro / Multi-Asset":
-        st.markdown("### 🕸️ Impact Transmission Path")
-        st.caption(
-            "How this macro event propagates through regions, assets, and into your portfolio."
-        )
-
         graph_data = build_transmission_graph(decision_text, portfolio, c)
-        render_network_graph(graph_data)
+
+        if graph_data:
+            st.markdown("### 🕸️ Impact Transmission Path")
+            st.caption(
+                "How this macro event propagates through regions, assets, and into your portfolio."
+            )
+            render_network_graph(graph_data)
+
 
     st.markdown("---")
     
