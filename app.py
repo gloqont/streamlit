@@ -8,6 +8,9 @@ import ast
 import yfinance as yf
 import feedparser
 import random
+from pyvis.network import Network
+import tempfile
+
 
 ANALYTICS_FILE = "analytics_events.csv"
 FOUNDER_EMAIL = "dgosa1437@gmail.com"
@@ -561,7 +564,166 @@ def consequence_engine(target, magnitude, portfolio, total_value, mode):
         "break_time": break_time,
         "unit": unit,
         "block": block
+    } 
+
+
+# ================= TRANSMISSION GRAPH LOGIC =================
+def build_transmission_graph(decision_text, portfolio, c):
+    text = decision_text.lower()
+
+    # ---- Step 1: Detect macro drivers ----
+    macro_drivers = []
+    if any(k in text for k in ["rate", "hike", "cut", "policy"]):
+        macro_drivers.append(("Interest Rates", 1.2))
+    if any(k in text for k in ["inflation", "cpi", "prices"]):
+        macro_drivers.append(("Inflation", 1.0))
+    if any(k in text for k in ["liquidity", "credit", "crisis", "stress"]):
+        macro_drivers.append(("Liquidity", 1.3))
+    if any(k in text for k in ["growth", "recession", "slowdown"]):
+        macro_drivers.append(("Growth", 1.1))
+    if any(k in text for k in ["fx", "currency", "dollar", "rupee", "euro"]):
+        macro_drivers.append(("FX", 1.0))
+
+    if not macro_drivers:
+        return None  # graph not applicable
+
+    nodes = []
+    edges = []
+
+    # ---- Step 2: Portfolio node ----
+    nodes.append({
+        "id": "portfolio",
+        "type": "portfolio",
+        "label": "Your Portfolio",
+        "severity": 0
+    })
+
+    # ---- Step 3: Region aggregation ----
+    region_weights = (
+        portfolio.groupby("Region")["Weight (%)"].sum().to_dict()
+    )
+
+    # ---- Step 4: Build graph ----
+    for macro, macro_factor in macro_drivers:
+        macro_id = macro.lower().replace(" ", "_")
+
+        nodes.append({
+            "id": macro_id,
+            "type": "macro",
+            "label": macro,
+            "severity": macro_factor * c["multiplier"]
+        })
+
+        for region, weight in region_weights.items():
+            region_id = region.lower().replace(" ", "_")
+
+            severity = weight * c["multiplier"] * macro_factor
+
+            nodes.append({
+                "id": region_id,
+                "type": "region",
+                "label": region,
+                "severity": round(severity, 2)
+            })
+
+            edges.append({
+                "from": macro_id,
+                "to": region_id,
+                "weight": round(severity, 2)
+            })
+
+            region_assets = portfolio[portfolio["Region"] == region]
+
+            for _, row in region_assets.iterrows():
+                asset_id = row["Asset"]
+
+                asset_severity = row["Weight (%)"] * c["multiplier"]
+
+                nodes.append({
+                    "id": asset_id,
+                    "type": "asset",
+                    "label": asset_id,
+                    "severity": round(asset_severity, 2)
+                })
+
+                edges.append({
+                    "from": region_id,
+                    "to": asset_id,
+                    "weight": round(asset_severity, 2)
+                })
+
+                edges.append({
+                    "from": asset_id,
+                    "to": "portfolio",
+                    "weight": round(row["Weight (%)"], 2)
+                })
+
+    # ---- Step 5: Deduplicate nodes ----
+    unique_nodes = {n["id"]: n for n in nodes}.values()
+
+    return {
+        "nodes": list(unique_nodes),
+        "edges": edges
     }
+
+# ================= TRANSMISSION GRAPH RENDERER =================
+def render_network_graph(graph_data):
+    if not graph_data:
+        return
+
+    net = Network(
+        height="420px",
+        width="100%",
+        directed=True,
+        bgcolor="#0e1117",
+        font_color="white"
+    )
+
+    # Fixed layout – no physics
+    net.toggle_physics(False)
+
+    # Color mapping by severity
+    def node_color(severity):
+        if severity > 5:
+            return "#ff4d4d"   # Critical
+        elif severity > 2:
+            return "#f5a623"   # Elevated
+        return "#6fcf97"       # Neutral
+
+    # ---- Add nodes ----
+    for n in graph_data["nodes"]:
+        net.add_node(
+            n["id"],
+            label=n["label"],
+            title=f"Severity: {n['severity']}",
+            color=node_color(n["severity"]),
+            shape={
+                "macro": "diamond",
+                "region": "ellipse",
+                "asset": "box",
+                "portfolio": "star"
+            }.get(n["type"], "dot")
+        )
+
+    # ---- Add edges ----
+    for e in graph_data["edges"]:
+        net.add_edge(
+            e["from"],
+            e["to"],
+            value=e["weight"],
+            title=f"Impact weight: {e['weight']}"
+        )
+
+    # ---- Render to temp HTML ----
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as tmp:
+        net.save_graph(tmp.name)
+        st.components.v1.html(
+            open(tmp.name, "r", encoding="utf-8").read(),
+            height=450,
+            scrolling=False
+        )
+
+
 
 # ================= CONSEQUENCES DISPLAY =================
 def show_consequences(target, c, portfolio, total_value, decision_text, mode):
@@ -581,7 +743,17 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
             st.info(f"ℹ️ {n['title']}")
 
     st.caption("Market news is provided for context only, not as a recommendation.")
-    
+
+    # ================= TRANSMISSION GRAPH =================
+    if target == "Macro / Multi-Asset":
+        st.markdown("### 🕸️ Impact Transmission Path")
+        st.caption(
+            "How this macro event propagates through regions, assets, and into your portfolio."
+        )
+
+        graph_data = build_transmission_graph(decision_text, portfolio, c)
+        render_network_graph(graph_data)
+
     st.markdown("---")
     
     st.markdown("### 🟢 If You Do Nothing")
@@ -623,7 +795,8 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
     
     st.markdown("### 🧩 Risk Concentration Attribution")
     st.dataframe(
-        portfolio[["Asset", "Weight (%)"]].sort_values("Weight (%)", ascending=False),
+        portfolio[["Asset", "Weight (%)"]]
+        .sort_values("Weight (%)", ascending=False),
         use_container_width=True
     )
     
