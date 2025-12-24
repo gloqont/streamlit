@@ -71,10 +71,6 @@ def validate_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
-def to_date(df):
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
-    return df
 
 # ================= AUTHENTICATION SCREEN =================
 def show_login():
@@ -652,7 +648,9 @@ def show_founder_analytics():
     # -------------------------
     st.markdown("## 📈 Time-Series Trends")
 
-    df_ts = add_date_column(df)
+    df_ts = df.copy()
+    df_ts["date"] = pd.to_datetime(df_ts["timestamp"]).dt.date
+
 
     # Daily Signups
     signups_ts = (
