@@ -1139,13 +1139,14 @@ def show_tax_impact():
             "- This is **not tax advice**"
         )
 
-if not st.session_state.get("portfolio_entered") or "last_decision" not in st.session_state:
-    st.warning(
-        "Simulation becomes available after you complete at least one portfolio decision analysis."
-    )
-    return
 
 def show_simulation():
+    if not st.session_state.get("portfolio_entered") or "last_decision" not in st.session_state:
+        st.warning(
+            "Simulation becomes available after you complete at least one portfolio decision analysis."
+        )
+        return
+
     st.button("← Back to Portfolio", on_click=lambda: st.session_state.update({"active_tab": "Portfolio"}))
 
     st.markdown("## 🔁 Decision Path Simulation (Illustrative, Not Predictive)")
