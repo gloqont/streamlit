@@ -44,6 +44,38 @@ if "pending_price" not in st.session_state:
 if "active_tab" not in st.session_state:
     st.session_state.active_tab = "Portfolio"
 
+# 👇 3️⃣ REAL COUNTRY-BASED TAX RATES (MVP-SAFE, NOT FAKE)
+TAX_RULES = {
+    "United States": {
+        "long_term_capital_gains": 0.15,
+        "short_term_capital_gains": 0.30,
+        "crypto": 0.30,
+        "transaction_tax": 0.00,
+        "fx_drag": 0.005
+    },
+    "India": {
+        "long_term_capital_gains": 0.10,
+        "short_term_capital_gains": 0.15,
+        "crypto": 0.30,
+        "transaction_tax": 0.001,
+        "fx_drag": 0.01
+    },
+    "United Kingdom": {
+        "long_term_capital_gains": 0.20,
+        "short_term_capital_gains": 0.20,
+        "crypto": 0.20,
+        "transaction_tax": 0.005,
+        "fx_drag": 0.008
+    },
+    "Europe (Generic)": {
+        "long_term_capital_gains": 0.25,
+        "short_term_capital_gains": 0.25,
+        "crypto": 0.25,
+        "transaction_tax": 0.002,
+        "fx_drag": 0.01
+    }
+}
+
 # ================= ANALYTICS LOGGING =================
 def log_event(event_type, data=None):
     timestamp = datetime.utcnow().isoformat()
@@ -491,6 +523,13 @@ def show_analysis():
         magnitude = st.slider("Decision Size / Intensity (%)", 1, 30, 5,
                             help="How significant is this decision relative to your portfolio?")
         
+        # 👇 1️⃣ Add Tax Residency Selector (ONE dropdown)
+        tax_country = st.selectbox(
+            "Tax Residency Country",
+            ["United States", "India", "United Kingdom", "Europe (Generic)", "Other"],
+            help="Used to estimate after-tax impact. You can change this later."
+        )
+        
         submit = st.form_submit_button("🔍 Show Consequences", type="primary", use_container_width=True)
     
     if submit and decision_text.strip():
@@ -505,13 +544,14 @@ def show_analysis():
         target = analyze_decision(decision_text, portfolio)
         c = consequence_engine(target, magnitude, portfolio, total_value, mode)
         
-        # 👇 Store last decision context in session state
+        # 👇 2️⃣ Persist Country With the Decision (CRITICAL)
         st.session_state.last_decision = {
             "decision_text": decision_text,
             "target": target,
             "expected_before_tax": c["expected"],
             "portfolio": portfolio,
-            "total_value": total_value
+            "total_value": total_value,
+            "tax_country": tax_country   # 👈 ADD THIS
         }
         
         show_consequences(target, c, portfolio, total_value, decision_text, mode)
@@ -1003,7 +1043,7 @@ def show_founder_analytics():
     )
 
 
-# 👇 FULL TAX TAB IMPLEMENTATION (COPY–PASTE)
+# 👇 FULL TAX TAB IMPLEMENTATION (COPY–PASTE) — UPDATED TO USE REAL RATES
 def show_tax_impact():
     st.button("← Back to Portfolio", on_click=lambda: st.session_state.update({"active_tab": "Portfolio"}))
 
@@ -1015,12 +1055,25 @@ def show_tax_impact():
 
     ctx = st.session_state.last_decision
 
-    # ---------------- TAX ASSUMPTIONS (MVP SAFE) ----------------
-    estimated_tax = 18400
-    effective_rate = 23.1
-    after_tax_impact = -3.7
-    before_tax_impact = ctx["expected_before_tax"]
-    tax_drag = round(abs(after_tax_impact - before_tax_impact), 1)
+    # 👇 4️⃣ USE REAL RATES INSIDE show_tax_impact()
+    country = ctx["tax_country"]
+    rules = TAX_RULES.get(country, TAX_RULES["United States"])
+
+    portfolio_value = ctx["total_value"]
+
+    estimated_tax = round(
+        portfolio_value * (
+            rules["short_term_capital_gains"] * 0.4 +
+            rules["long_term_capital_gains"] * 0.4 +
+            rules["transaction_tax"] +
+            rules["fx_drag"]
+        ),
+        0
+    )
+
+    effective_rate = round((estimated_tax / portfolio_value) * 100, 1)
+    after_tax_impact = round(ctx["expected_before_tax"] - effective_rate / 10, 1)
+    tax_drag = round(abs(after_tax_impact - ctx["expected_before_tax"]), 1)
 
     # ================= 1. TAX SUMMARY CARD =================
     st.markdown("### 🧾 Tax Impact If You Execute This Decision")
@@ -1043,10 +1096,10 @@ def show_tax_impact():
             "FX tax drag"
         ],
         "Amount": [
-            "$11,200",
-            "$4,600",
-            "$1,200",
-            "$1,400"
+            f"${portfolio_value * rules['short_term_capital_gains'] * 0.4:,.0f}",
+            f"${portfolio_value * rules['long_term_capital_gains'] * 0.4:,.0f}",
+            f"${portfolio_value * rules['transaction_tax']:,.0f}",
+            f"${portfolio_value * rules['fx_drag']:,.0f}"
         ],
         "Reason": [
             "Long-term sale",
@@ -1082,7 +1135,7 @@ def show_tax_impact():
             "Tax increases downside by"
         ],
         "Impact (%)": [
-            f"{before_tax_impact}%",
+            f"{ctx['expected_before_tax']}%",
             f"{after_tax_impact}%",
             f"{tax_drag}%"
         ]
@@ -1095,9 +1148,10 @@ def show_tax_impact():
     # ================= 5. EVIDENCE & ASSUMPTIONS =================
     with st.expander("Evidence & Assumptions"):
         st.markdown(
-            "- Tax rules applied at **jurisdiction level** based on portfolio regions\n"
-            "- Holding period assumed **mixed (short + long term)**\n"
-            "- Rates shown are **estimates, not guarantees**\n"
+            "- Tax rules applied based on **declared tax residency**\n"
+            "- Capital gains split assumed **40% short-term / 40% long-term**\n"
+            "- Rates are **jurisdiction-level estimates**\n"
+            "- No deductions, exemptions, or tax-loss harvesting assumed\n"
             "- This is **not tax advice**"
         )
 
@@ -1132,4 +1186,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
