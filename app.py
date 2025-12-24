@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime
 import re
 import os
+import ast
+
 
 ANALYTICS_FILE = "analytics_events.csv"
 
@@ -660,9 +662,19 @@ def show_founder_analytics():
     # --- STAY TIME ---
     portfolio_events = df[df["event"] == "portfolio_confirmed"]
     if not portfolio_events.empty:
-        avg_stay = portfolio_events["data"].apply(
-            lambda x: x.get("time_spent_seconds", 0)
-        ).mean()
+        def extract_time_spent(val):
+            try:
+                if isinstance(val, dict):
+                    return val.get("time_spent_seconds", 0)
+                if isinstance(val, str):
+                    parsed = ast.literal_eval(val)
+                    return parsed.get("time_spent_seconds", 0)
+            except Exception:
+                return 0
+            return 0
+
+        avg_stay = portfolio_events["data"].apply(extract_time_spent).mean()
+
         st.sidebar.metric("Avg Stay Time (sec)", f"{avg_stay:.0f}")
 
     # --- RAW EVENT LOG (YOU ONLY) ---
