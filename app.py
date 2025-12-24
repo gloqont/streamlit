@@ -1140,21 +1140,162 @@ def show_tax_impact():
         )
 
 
-# main logic
+def show_simulation():
+    st.button("← Back to Portfolio", on_click=lambda: st.session_state.update({"active_tab": "Portfolio"}))
 
+    st.markdown("## 🔁 Decision Path Simulation (Not a Forecast)")
+    st.caption("We simulate consequence accumulation, not market prediction.")
+
+    if "last_decision" not in st.session_state:
+        st.warning("Run a portfolio decision first to enable simulation.")
+        return
+
+    ctx = st.session_state.last_decision
+    portfolio = ctx["portfolio"]
+    total_value = ctx["total_value"]
+    expected = ctx["expected_before_tax"]
+    country = ctx["tax_country"]
+
+    # -------------------------------
+    # 1. Decision Repetition Selector
+    # -------------------------------
+    st.markdown("### 🔂 Decision Repetition Scenario")
+
+    repetition = st.selectbox(
+        "Repeat this decision:",
+        [
+            "Once",
+            "Quarterly for 1 year",
+            "Quarterly for 3 years",
+            "Every market stress event"
+        ]
+    )
+
+    repetition_map = {
+        "Once": 1,
+        "Quarterly for 1 year": 4,
+        "Quarterly for 3 years": 12,
+        "Every market stress event": 6
+    }
+
+    n = repetition_map[repetition]
+
+    cumulative_downside = round(expected * n * 1.2, 1)
+    capital_at_risk = round(abs(cumulative_downside) * total_value / 100, 0)
+
+    if capital_at_risk < total_value * 0.15:
+        forced_exit_risk = "Low"
+    elif capital_at_risk < total_value * 0.35:
+        forced_exit_risk = "Medium"
+    else:
+        forced_exit_risk = "High"
+
+    tax_drag = round(n * 0.3, 1)
+
+    st.markdown("### 📉 If This Decision Pattern Continues…")
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Cumulative Downside", f"{cumulative_downside}%")
+    col2.metric("Capital at Risk", f"${capital_at_risk:,.0f}")
+    col3.metric("Forced Exit Risk", forced_exit_risk)
+    col4.metric("Compounding Tax Drag", f"{tax_drag}%")
+
+    st.markdown("---")
+
+    # -------------------------------
+    # 2. Regime Sensitivity Matrix
+    # -------------------------------
+    st.markdown("### 🌍 Regime Sensitivity Matrix")
+
+    regime_df = pd.DataFrame({
+        "Market Regime": [
+            "Calm / Low Vol",
+            "High Volatility",
+            "Liquidity Stress",
+            "Policy Shock"
+        ],
+        "Outcome if Repeated": [
+            "Mild drag",
+            "Accelerated losses",
+            "Irreversible damage",
+            "Forced deleveraging"
+        ]
+    })
+
+    st.table(regime_df)
+
+    st.markdown("---")
+
+    # -------------------------------
+    # 3. Path Comparison
+    # -------------------------------
+    st.markdown("### 🛤️ Path Comparison")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("**Path A: Do Nothing**")
+        st.markdown(
+            "- Lower turnover\n"
+            "- Lower tax drag\n"
+            "- Slower drawdowns\n"
+            "- Optionality preserved"
+        )
+
+    with col2:
+        st.markdown("**Path B: Execute Repeatedly**")
+        st.markdown(
+            "- Higher turnover\n"
+            "- Structural tax bleed\n"
+            "- Faster recovery time\n"
+            "- Optionality reduced"
+        )
+
+    st.markdown("---")
+
+    # -------------------------------
+    # 4. Point of No Return
+    # -------------------------------
+    st.markdown("### ⛔ Point of No Return")
+
+    st.error(
+        f"After **{max(3, int(n / 2))} repetitions**, recovery depends on "
+        "external conditions, not skill."
+    )
+
+    st.markdown("---")
+
+    # -------------------------------
+    # 5. Confidence Band
+    # -------------------------------
+    st.markdown("### 📊 Simulation Confidence")
+
+    st.info(
+        "**Confidence Level: Medium**\n\n"
+        "- Based on portfolio concentration\n"
+        "- Based on decision size\n"
+        "- Based on regime sensitivity\n\n"
+        "_This simulation reflects structural risk, not price prediction._"
+    )
+
+# main logic
 def main():
     # 👇 SIDEBAR NAVIGATION (ADD THIS)
     st.sidebar.title("GLOQONT")
 
     st.session_state.active_tab = st.sidebar.radio(
         "Navigate",
-        ["Portfolio", "Tax Impact"],
-        index=0 if st.session_state.active_tab == "Portfolio" else 1
+        ["Portfolio", "Tax Impact", "Simulation"],
+        index=["Portfolio", "Tax Impact", "Simulation"].index(st.session_state.active_tab)
     )
+
 
     # 👇 TAX TAB ENTRY POINT
     if st.session_state.active_tab == "Tax Impact":
         show_tax_impact()
+        return
+    if st.session_state.active_tab == "Simulation":
+        show_simulation()
         return
 
     if st.session_state.user_email == FOUNDER_EMAIL:
