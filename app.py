@@ -881,22 +881,6 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
         "portfolio_value": total_value
     })
     
-    st.markdown("---")
-    st.markdown("### 💬 Was This Analysis Helpful?")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("👍 Very Helpful", use_container_width=True):
-            log_event("feedback_positive", {"decision": decision_text})
-            st.success("Thank you! 🙏")
-    with col2:
-        if st.button("🤔 Somewhat Helpful", use_container_width=True):
-            log_event("feedback_neutral", {"decision": decision_text})
-            st.info("Thanks for the feedback!")
-    with col3:
-        if st.button("👎 Not Helpful", use_container_width=True):
-            log_event("feedback_negative", {"decision": decision_text})
-            st.warning("We'll improve!")
 
 # ================= IRREVERSIBLE HEATMAP =================
 def show_irreversible_heatmap(c):
