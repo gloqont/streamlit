@@ -1139,12 +1139,17 @@ def show_tax_impact():
             "- This is **not tax advice**"
         )
 
+if not st.session_state.get("portfolio_entered") or "last_decision" not in st.session_state:
+    st.warning(
+        "Simulation becomes available after you complete at least one portfolio decision analysis."
+    )
+    return
 
 def show_simulation():
     st.button("← Back to Portfolio", on_click=lambda: st.session_state.update({"active_tab": "Portfolio"}))
 
-    st.markdown("## 🔁 Decision Path Simulation (Not a Forecast)")
-    st.caption("We simulate consequence accumulation, not market prediction.")
+    st.markdown("## 🔁 Decision Path Simulation (Illustrative, Not Predictive)")
+    st.caption("This simulation models consequence accumulation and structural exposure. It does not forecast prices or returns.")
 
     if "last_decision" not in st.session_state:
         st.warning("Run a portfolio decision first to enable simulation.")
@@ -1159,7 +1164,7 @@ def show_simulation():
     # -------------------------------
     # 1. Decision Repetition Selector
     # -------------------------------
-    st.markdown("### 🔂 Decision Repetition Scenario")
+    st.markdown("### 🔂 Decision Repetition Assumption ")
 
     repetition = st.selectbox(
         "Repeat this decision:",
@@ -1192,20 +1197,20 @@ def show_simulation():
 
     tax_drag = round(n * 0.3, 1)
 
-    st.markdown("### 📉 If This Decision Pattern Continues…")
+    st.markdown("### 📉 Illustrative Outcome Under Repeated Execution")
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Cumulative Downside", f"{cumulative_downside}%")
-    col2.metric("Capital at Risk", f"${capital_at_risk:,.0f}")
-    col3.metric("Forced Exit Risk", forced_exit_risk)
-    col4.metric("Compounding Tax Drag", f"{tax_drag}%")
+    col1.metric("Cumulative Downside Exposure", f"{cumulative_downside}%")
+    col2.metric("Capital Subject to Irreversible Loss", f"${capital_at_risk:,.0f}")
+    col3.metric("Risk of Forced Portfolio Action", forced_exit_risk)
+    col4.metric("Compounding Tax Drag (Illustrative)", f"{tax_drag}%")
 
     st.markdown("---")
 
     # -------------------------------
     # 2. Regime Sensitivity Matrix
     # -------------------------------
-    st.markdown("### 🌍 Regime Sensitivity Matrix")
+    st.markdown("### 🌍 Regime Sensitivity Assessment ")
 
     regime_df = pd.DataFrame({
         "Market Regime": [
@@ -1214,7 +1219,7 @@ def show_simulation():
             "Liquidity Stress",
             "Policy Shock"
         ],
-        "Outcome if Repeated": [
+        "Observed Structural Effect": [
             "Mild drag",
             "Accelerated losses",
             "Irreversible damage",
@@ -1234,7 +1239,7 @@ def show_simulation():
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("**Path A: Do Nothing**")
+        st.markdown("**Baseline Path: No Incremental Action**")
         st.markdown(
             "- Lower turnover\n"
             "- Lower tax drag\n"
@@ -1243,7 +1248,7 @@ def show_simulation():
         )
 
     with col2:
-        st.markdown("**Path B: Execute Repeatedly**")
+        st.markdown("**Execution Path: Repeated Decision Exposure**")
         st.markdown(
             "- Higher turnover\n"
             "- Structural tax bleed\n"
@@ -1259,8 +1264,8 @@ def show_simulation():
     st.markdown("### ⛔ Point of No Return")
 
     st.error(
-        f"After **{max(3, int(n / 2))} repetitions**, recovery depends on "
-        "external conditions, not skill."
+        f"Beyond this point, portfolio recovery becomes predominantly dependent on "
+        "external market conditions rather than decision quality.."
     )
 
     st.markdown("---")
@@ -1271,23 +1276,28 @@ def show_simulation():
     st.markdown("### 📊 Simulation Confidence")
 
     st.info(
-        "**Confidence Level: Medium**\n\n"
+        "**Simulation Confidence: Medium**\n\n"
         "- Based on portfolio concentration\n"
         "- Based on decision size\n"
         "- Based on regime sensitivity\n\n"
-        "_This simulation reflects structural risk, not price prediction._"
-    )
+        "_This simulation reflects structural and behavioral risk pathways. It does not represent a probabilistic forecast._")
 
 # main logic
 def main():
     # 👇 SIDEBAR NAVIGATION (ADD THIS)
     st.sidebar.title("GLOQONT")
 
+    tabs = ["Portfolio", "Tax Impact"]
+
+    if st.session_state.get("portfolio_entered") and "last_decision" in st.session_state:
+        tabs.append("Simulation")
+
     st.session_state.active_tab = st.sidebar.radio(
         "Navigate",
-        ["Portfolio", "Tax Impact", "Simulation"],
-        index=["Portfolio", "Tax Impact", "Simulation"].index(st.session_state.active_tab)
+        tabs,
+        index=tabs.index(st.session_state.active_tab) if st.session_state.active_tab in tabs else 0
     )
+
 
 
     # 👇 TAX TAB ENTRY POINT
