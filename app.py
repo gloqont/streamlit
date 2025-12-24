@@ -10,10 +10,7 @@ import ast
 ANALYTICS_FILE = "analytics_events.csv"
 
 FOUNDER_EMAIL = "dgosa1437@gmail.com"
-def to_date(df):
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
-    return df
+
 
 # ================= CONFIG =================
 st.set_page_config(page_title="GLOQONT", layout="centered")
@@ -624,7 +621,11 @@ def show_portfolio_exposure(c, portfolio, total_value):
             "⚠️ A material portion of the portfolio has entered a structurally fragile state. "
             "Recovery now depends on favorable external conditions, not decision quality."
         )
-
+def to_date(df):
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+    return df
+    
 def show_founder_analytics():
     st.markdown("## 🧠 Founder Analytics (Internal Only)")
 
