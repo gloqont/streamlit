@@ -3,6 +3,10 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import re
+import os
+
+ANALYTICS_FILE = "analytics_events.csv"
+
 FOUNDER_EMAIL = "dgosa1437@gmail.com"
 
 # ================= CONFIG =================
@@ -28,7 +32,6 @@ if "session_start" not in st.session_state:
 
 # ================= ANALYTICS LOGGING =================
 def log_event(event_type, data=None):
-    """Log user events for validation metrics"""
     timestamp = datetime.utcnow().isoformat()
     log_entry = {
         "timestamp": timestamp,
@@ -36,15 +39,25 @@ def log_event(event_type, data=None):
         "event": event_type,
         "data": data or {}
     }
-    
-    # In production, send to database/analytics
-    # For now, append to session
+
+    # ---- Session log (still useful) ----
     if "event_log" not in st.session_state:
         st.session_state.event_log = []
     st.session_state.event_log.append(log_entry)
-    
-    # TODO: Send to backend/database
-    # requests.post("your-backend.com/events", json=log_entry)
+
+    # ---- Global persistent log ----
+    df = pd.DataFrame([{
+        "timestamp": timestamp,
+        "user_email": st.session_state.user_email,
+        "event": event_type,
+        "data": str(data or {})
+    }])
+
+    if os.path.exists(ANALYTICS_FILE):
+        df.to_csv(ANALYTICS_FILE, mode="a", header=False, index=False)
+    else:
+        df.to_csv(ANALYTICS_FILE, index=False)
+
 
 # ================= HELPERS =================
 def now():
@@ -609,11 +622,12 @@ def show_portfolio_exposure(c, portfolio, total_value):
 def show_founder_analytics():
     st.sidebar.markdown("## 🧠 Founder Analytics")
 
-    if "event_log" not in st.session_state or not st.session_state.event_log:
+    if not os.path.exists(ANALYTICS_FILE):
         st.sidebar.info("No analytics data yet.")
         return
 
-    df = pd.DataFrame(st.session_state.event_log)
+    df = pd.read_csv(ANALYTICS_FILE)
+
 
     # --- BASIC COUNTS ---
     signups = df[df["event"] == "user_signup"]["user_email"].nunique()
