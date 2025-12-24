@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import re
+FOUNDER_EMAIL = "dgosa1437@gmail.com"
 
 # ================= CONFIG =================
 st.set_page_config(page_title="GLOQONT", layout="centered")
@@ -605,8 +606,61 @@ def show_portfolio_exposure(c, portfolio, total_value):
             "Recovery now depends on favorable external conditions, not decision quality."
         )
 
+def show_founder_analytics():
+    st.sidebar.markdown("## 🧠 Founder Analytics")
+
+    if "event_log" not in st.session_state or not st.session_state.event_log:
+        st.sidebar.info("No analytics data yet.")
+        return
+
+    df = pd.DataFrame(st.session_state.event_log)
+
+    # --- BASIC COUNTS ---
+    signups = df[df["event"] == "user_signup"]["user_email"].nunique()
+    portfolio_confirms = df[df["event"] == "portfolio_confirmed"]["user_email"].nunique()
+    simulations = df[df["event"] == "simulation_run"]
+
+    activation_rate = (
+        portfolio_confirms / signups * 100 if signups > 0 else 0
+    )
+
+    st.sidebar.metric("Signups", signups)
+    st.sidebar.metric("Portfolio Confirmed", portfolio_confirms)
+    st.sidebar.metric("Activation Rate", f"{activation_rate:.1f}%")
+
+    # --- SIMULATIONS PER USER ---
+    if not simulations.empty:
+        sims_per_user = simulations.groupby("user_email").size()
+        st.sidebar.metric(
+            "Avg Simulations / User",
+            f"{sims_per_user.mean():.2f}"
+        )
+
+    # --- FEEDBACK SENTIMENT ---
+    feedback = df[df["event"].str.startswith("feedback")]
+    if not feedback.empty:
+        sentiment_counts = feedback["event"].value_counts()
+        st.sidebar.markdown("### Feedback Sentiment")
+        st.sidebar.write(sentiment_counts)
+
+    # --- STAY TIME ---
+    portfolio_events = df[df["event"] == "portfolio_confirmed"]
+    if not portfolio_events.empty:
+        avg_stay = portfolio_events["data"].apply(
+            lambda x: x.get("time_spent_seconds", 0)
+        ).mean()
+        st.sidebar.metric("Avg Stay Time (sec)", f"{avg_stay:.0f}")
+
+    # --- RAW EVENT LOG (YOU ONLY) ---
+    with st.sidebar.expander("🔍 Raw Event Log"):
+        st.sidebar.dataframe(df)
+
 # ================= MAIN APP LOGIC =================
 def main():
+    # Founder analytics (sidebar only)
+    if st.session_state.user_email == FOUNDER_EMAIL:
+        show_founder_analytics()
+
     if not st.session_state.authenticated:
         show_login()
     elif not st.session_state.portfolio_entered:
@@ -614,5 +668,10 @@ def main():
     else:
         show_analysis()
 
+
 if __name__ == "__main__":
-    main()
+    main() 
+
+
+
+
