@@ -71,6 +71,11 @@ def validate_email(email):
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     return re.match(pattern, email) is not None
 
+def to_date(df):
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+    return df
+
 # ================= AUTHENTICATION SCREEN =================
 def show_login():
     st.title("🎯 GLOQONT")
@@ -621,10 +626,6 @@ def show_portfolio_exposure(c, portfolio, total_value):
             "⚠️ A material portion of the portfolio has entered a structurally fragile state. "
             "Recovery now depends on favorable external conditions, not decision quality."
         )
-def to_date(df):
-    df = df.copy()
-    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
-    return df
     
 def show_founder_analytics():
     st.markdown("## 🧠 Founder Analytics (Internal Only)")
