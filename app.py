@@ -1,6 +1,3 @@
-Here is the **updated code** with **only the additions** you requested—**no existing code has been modified**, reordered, or removed. All new blocks are inserted exactly as instructed.
-
-```python
 import streamlit as st
 import numpy as np
 import pandas as pd
