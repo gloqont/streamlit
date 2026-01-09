@@ -249,19 +249,19 @@ def load_demo_portfolio_with_live_prices():
 
 # ================= AUTHENTICATION SCREEN =================
 def show_login():
-    st.title("🎯 GLOQONT")
+    st.title(" GLOQONT")
     st.subheader("See What Happens to Your Portfolio BEFORE You Make the Decision")
     
     st.markdown("""
     ### Why GLOQONT?
     - 📊 **Portfolio-wide impact analysis** - Not just single stock moves
-    - ⚡ **Real-time consequence modeling** - Before you commit capital
-    - 🎯 **Cross-asset correlation detection** - See hidden risks
-    - 🚨 **Irreversibility warnings** - Know what can't be undone
+    -  **Real-time consequence modeling** - Before you commit capital
+    -  **Cross-asset correlation detection** - See hidden risks
+    -  **Irreversibility warnings** - Know what can't be undone
     """)
     
     st.markdown("---")
-    st.markdown("### 🚀 Start Your Free Analysis")
+    st.markdown("###  Start Your Free Analysis")
     
     col1, col2 = st.columns([2, 1])
     
@@ -291,15 +291,15 @@ def show_login():
                     st.rerun()
     
     with col2:
-        st.info("💡 **Takes 5 minutes**\n\nNo payment required.\nYour data stays private.")
+        st.info(" **Takes 5 minutes**\n\nNo payment required.\nYour data stays private.")
 
 # ================= PORTFOLIO ENTRY SCREEN =================
 def show_portfolio_entry():
-    st.title(f"Welcome, {st.session_state.user_name}! 👋")
+    st.title(f"Welcome, {st.session_state.user_name}! ")
     st.markdown("### Enter Your Portfolio")
 
     st.info("""
-    **📝 How to enter your portfolio:**
+    ** How to enter your portfolio:**
     - Type the asset name or ticker (e.g., Apple, AAPL, Reliance, TCS)
     - For Indian stocks: We automatically add .NS suffix
     - Confirm the suggested equity for accuracy
@@ -310,7 +310,7 @@ def show_portfolio_entry():
         st.session_state.portfolio_entries = []
 
     # ---- SYMBOL RESOLUTION (OUTSIDE FORM) ----
-    st.markdown("#### 🔍 Step 1: Search for Asset")
+    st.markdown("####  Step 1: Search for Asset")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -343,10 +343,10 @@ def show_portfolio_entry():
                         "resolved_symbol": s["symbol"]
                     })
                     
-                    st.success(f"✅ Selected: {s['symbol']}")
+                    st.success(f" Selected: {s['symbol']}")
                     st.rerun()
         else:
-            st.warning("⚠️ No matching equity found. Try refining the name.")
+            st.warning(" No matching equity found. Try refining the name.")
 
     # ---- ADD POSITION FORM ----
     if st.session_state.pending_symbol:
@@ -393,7 +393,7 @@ def show_portfolio_entry():
                     "price_source": "yfinance_last_close"
                 })
 
-                st.success(f"✅ Added {st.session_state.pending_symbol} to portfolio!")
+                st.success(f" Added {st.session_state.pending_symbol} to portfolio!")
                 
                 # Reset pending
                 st.session_state.pending_symbol = None
@@ -404,7 +404,7 @@ def show_portfolio_entry():
     # ---- PORTFOLIO PREVIEW ----
     if st.session_state.portfolio_entries:
         st.markdown("---")
-        st.markdown("#### 📊 Your Portfolio Preview")
+        st.markdown("####  Your Portfolio Preview")
 
         df = pd.DataFrame(st.session_state.portfolio_entries)
         df["Value"] = df["Quantity"] * df["Price"]
@@ -418,16 +418,16 @@ def show_portfolio_entry():
                 st.text(f"{row['Asset']} | {row['Region']} | {row['Class']} | "
                        f"Qty: {row['Quantity']:.4f} @ ${row['Price']:.2f} = ${row['Value']:,.2f} ({row['Weight (%)']:.1f}%)")
             with col2:
-                if st.button("🗑️", key=f"delete_{idx}"):
+                if st.button("", key=f"delete_{idx}"):
                     st.session_state.portfolio_entries.pop(idx)
                     st.rerun()
 
-        st.markdown(f"**💰 Total Portfolio Value: ${total:,.2f}**")
+        st.markdown(f"** Total Portfolio Value: ${total:,.2f}**")
 
         # Confirm button
-        if st.button("✅ Confirm Portfolio & Start Analysis", type="primary", use_container_width=True):
+        if st.button(" Confirm Portfolio & Start Analysis", type="primary", use_container_width=True):
             if len(df) < 2:
-                st.error("❌ Please add at least 2 positions.")
+                st.error(" Please add at least 2 positions.")
             else:
                 st.session_state.user_portfolio = df
                 st.session_state.portfolio_entered = True
@@ -438,17 +438,17 @@ def show_portfolio_entry():
                     "time_spent_seconds": (datetime.utcnow() - st.session_state.session_start).seconds
                 })
 
-                st.success("🎉 Portfolio saved! Redirecting...")
+                st.success(" Portfolio saved! Redirecting...")
                 st.rerun()
     else:
-        st.warning("👆 Search and select an asset above to start building your portfolio")
+        st.warning(" Search and select an asset above to start building your portfolio")
 
     # ---- DEMO PORTFOLIO OPTION ----
     st.markdown("---")
     st.markdown("### 🎮 Or Try With Demo Portfolio")
     st.info("Load a sample portfolio with real market prices (updated daily)")
     
-    if st.button("📊 Load Demo Portfolio with Live Prices", use_container_width=True):
+    if st.button(" Load Demo Portfolio with Live Prices", use_container_width=True):
         with st.spinner("Fetching live market prices..."):
             demo_entries = load_demo_portfolio_with_live_prices()
             
@@ -459,10 +459,10 @@ def show_portfolio_entry():
                     "num_positions": len(demo_entries)
                 })
                 
-                st.success("✅ Demo portfolio loaded with live prices!")
+                st.success(" Demo portfolio loaded with live prices!")
                 st.rerun()
             else:
-                st.error("❌ Failed to load demo portfolio. Please try manually adding positions.")
+                st.error(" Failed to load demo portfolio. Please try manually adding positions.")
 
 # ================= DECISION ANALYSIS SCREEN =================
 def show_analysis():
@@ -479,13 +479,13 @@ def show_analysis():
     with col1:
         st.markdown(f"**User:** {st.session_state.user_name} | **Email:** {st.session_state.user_email}")
     with col2:
-        if st.button("📝 Edit Portfolio"):
+        if st.button(" Edit Portfolio"):
             st.session_state.portfolio_entered = False
             st.rerun()
     
     st.markdown("---")
     
-    st.markdown("## 💼 Your Portfolio Snapshot")
+    st.markdown("##  Your Portfolio Snapshot")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -507,7 +507,7 @@ def show_analysis():
     )
     
     with st.form("decision"):
-        st.markdown("## 🎯 Test Your Decision")
+        st.markdown("##  Test Your Decision")
         
         decision_type = st.selectbox(
             "Decision Type",
@@ -780,7 +780,7 @@ def render_network_graph(graph_data):
 
 # ================= CONSEQUENCES DISPLAY =================
 def show_consequences(target, c, portfolio, total_value, decision_text, mode):
-    st.markdown("## 🔴 Decision Consequences")
+    st.markdown("##  Decision Consequences")
     
     # ================= MARKET CONTEXT =================
     st.markdown("### 📰 Market Context (Last 24h)")
@@ -789,9 +789,9 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
 
     for n in news_items:
         if n["sentiment"] == "Negative":
-            st.error(f"🔻 {n['title']}")
+            st.error(f" {n['title']}")
         elif n["sentiment"] == "Positive":
-            st.success(f"🔺 {n['title']}")
+            st.success(f" {n['title']}")
         else:
             st.info(f"ℹ️ {n['title']}")
 
@@ -803,7 +803,7 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
         graph_data = build_transmission_graph(decision_text, portfolio, c)
 
         if graph_data:
-            st.markdown("### 🕸️ Impact Transmission Path")
+            st.markdown("###  Impact Transmission Path")
             st.caption(
                 "How this macro event propagates through regions, assets, and into your portfolio."
             )
@@ -812,19 +812,19 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
 
     st.markdown("---")
     
-    st.markdown("### 🟢 If You Do Nothing")
+    st.markdown("###  If You Do Nothing")
     st.markdown(
         "• Portfolio risk remains unchanged\n"
         "• Expected drift: +0.6%\n"
         "• No acceleration of downside"
     )
     
-    st.markdown("### 🔴 If You Execute This Decision")
+    st.markdown("###  If You Execute This Decision")
     
     if c["block"]:
-        st.error("⛔ DO NOT EXECUTE — downside accelerates beyond recovery control")
+        st.error(" DO NOT EXECUTE — downside accelerates beyond recovery control")
     else:
-        st.warning("⚠️ Risk increases materially — execution requires discipline")
+        st.warning(" Risk increases materially — execution requires discipline")
     
     st.markdown(
         f"**Primary exposure impacted:** {target}\n\n"
@@ -833,30 +833,30 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
     
     st.metric("Downside Amplification", f"{c['multiplier']}×")
     
-    st.markdown("### 📊 Portfolio Impact Distribution")
+    st.markdown("###  Portfolio Impact Distribution")
     st.table(pd.DataFrame({
         "Scenario": ["Worst Case", "Best Case", "Expected"],
         "Portfolio Change (%)": [c["worst"], c["best"], c["expected"]]
     }))
     
-    st.markdown("### ⏱️ Time-to-Damage")
+    st.markdown("###  Time-to-Damage")
     st.metric("Losses accelerate within", f"{c['break_time']} {c['unit']}")
     
-    st.markdown("### 🌪️ Fragile Under Market Regimes")
+    st.markdown("###  Fragile Under Market Regimes")
     st.markdown(
         "• Volatility expansion\n"
         "• Liquidity contraction\n"
         "• Correlation spikes"
     )
     
-    st.markdown("### 🧩 Risk Concentration Attribution")
+    st.markdown("###  Risk Concentration Attribution")
     st.dataframe(
         portfolio[["Asset", "Weight (%)"]]
         .sort_values("Weight (%)", ascending=False),
         use_container_width=True
     )
     
-    st.markdown("### 🚨 Irreversibility Check")
+    st.markdown("###  Irreversibility Check")
     
     capital_loss = abs(c["worst"]) * total_value / 100
     opportunity_loss = capital_loss * 0.6
@@ -884,7 +884,7 @@ def show_consequences(target, c, portfolio, total_value, decision_text, mode):
 
 # ================= IRREVERSIBLE HEATMAP =================
 def show_irreversible_heatmap(c):
-    st.markdown("### 🔥 Irreversible-Loss Heatmap")
+    st.markdown("###  Irreversible-Loss Heatmap")
     
     time_horizon = ["Weeks", "Months", "Years"]
     capital_risk = np.array([5, 10, 15, 20, 25, 30])
@@ -920,13 +920,13 @@ def show_irreversible_heatmap(c):
     
     if unrecoverable_pct > 0:
         st.error(
-            f"⚠️ This decision pushes approximately {unrecoverable_pct}% "
+            f" This decision pushes approximately {unrecoverable_pct}% "
             "of your portfolio into an unrecoverable loss zone under stress."
         )
 
 # ================= PORTFOLIO EXPOSURE =================
 def show_portfolio_exposure(c, portfolio, total_value):
-    st.markdown("### 🧠 Portfolio-Level Irreversible Exposure")
+    st.markdown("###  Portfolio-Level Irreversible Exposure")
     
     IRREVERSIBLE_THRESHOLD = 4.5
     
@@ -971,13 +971,13 @@ def show_portfolio_exposure(c, portfolio, total_value):
     
     if decision_irrev > 0:
         st.error(
-            "⚠️ A material portion of the portfolio has entered a structurally fragile state. "
+            " A material portion of the portfolio has entered a structurally fragile state. "
             "Recovery now depends on favorable external conditions, not decision quality."
         )
 
 # ================= FOUNDER ANALYTICS =================
 def show_founder_analytics():
-    st.markdown("## 🧠 Founder Analytics (Internal Only)")
+    st.markdown("##  Founder Analytics (Internal Only)")
 
     if not os.path.exists(ANALYTICS_FILE):
         st.info("No analytics data yet.")
@@ -993,13 +993,13 @@ def show_founder_analytics():
     activations = df[df["event"] == "portfolio_confirmed"]["user_email"].nunique()
     activation_rate = (activations / signups * 100) if signups > 0 else 0
 
-    st.markdown("### 📌 Core Metrics")
+    st.markdown("###  Core Metrics")
     col1, col2, col3 = st.columns(3)
     col1.metric("Signups", signups)
     col2.metric("Activated Users", activations)
     col3.metric("Activation Rate", f"{activation_rate:.1f}%")
 
-    st.markdown("### 🔻 Signup → Activation Funnel")
+    st.markdown("###  Signup → Activation Funnel")
     funnel_df = pd.DataFrame({
         "Stage": ["Signed Up", "Portfolio Confirmed"],
         "Users": [signups, activations]
@@ -1009,17 +1009,17 @@ def show_founder_analytics():
     sims = df[df["event"] == "simulation_run"]
     if not sims.empty:
         sims_per_user = sims.groupby("user_email").size()
-        st.markdown("### 🔁 Simulations per User")
+        st.markdown("###  Simulations per User")
         st.bar_chart(sims_per_user)
         st.metric("Avg Simulations / User", f"{sims_per_user.mean():.2f}")
 
     feedback = df[df["event"].str.startswith("feedback")]
     if not feedback.empty:
         sentiment = feedback["event"].value_counts().rename_axis("Sentiment").reset_index(name="Count")
-        st.markdown("### 💬 Feedback Sentiment")
+        st.markdown("###  Feedback Sentiment")
         st.bar_chart(sentiment.set_index("Sentiment"))
 
-    st.markdown("### 📁 Raw Analytics Data")
+    st.markdown("###  Raw Analytics Data")
     st.download_button(
         "Download analytics_events.csv",
         df.to_csv(index=False),
@@ -1031,7 +1031,7 @@ def show_founder_analytics():
 def show_tax_impact():
     st.button("← Back to Portfolio", on_click=lambda: st.session_state.update({"active_tab": "Portfolio"}))
 
-    st.markdown("## 🧾 Tax Impact Analysis")
+    st.markdown("##  Tax Impact Analysis")
 
     if "last_decision" not in st.session_state:
         st.warning("Run a portfolio decision first to see tax impact.")
@@ -1060,7 +1060,7 @@ def show_tax_impact():
     tax_drag = round(abs(after_tax_impact - ctx["expected_before_tax"]), 1)
 
     # ================= 1. TAX SUMMARY CARD =================
-    st.markdown("### 🧾 Tax Impact If You Execute This Decision")
+    st.markdown("###  Tax Impact If You Execute This Decision")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Estimated Tax Payable", f"${estimated_tax:,.0f}")
@@ -1149,7 +1149,7 @@ def show_simulation():
 
     st.button("← Back to Portfolio", on_click=lambda: st.session_state.update({"active_tab": "Portfolio"}))
 
-    st.markdown("## 🔁 Decision Path Simulation (Illustrative, Not Predictive)")
+    st.markdown("##  Decision Path Simulation (Illustrative, Not Predictive)")
     st.caption("This simulation models consequence accumulation and structural exposure. It does not forecast prices or returns.")
 
     if "last_decision" not in st.session_state:
@@ -1165,7 +1165,7 @@ def show_simulation():
     # -------------------------------
     # 1. Decision Repetition Selector
     # -------------------------------
-    st.markdown("### 🔂 Decision Repetition Assumption ")
+    st.markdown("###  Decision Repetition Assumption ")
 
     repetition = st.selectbox(
         "Repeat this decision:",
@@ -1198,7 +1198,7 @@ def show_simulation():
 
     tax_drag = round(n * 0.3, 1)
 
-    st.markdown("### 📉 Illustrative Outcome Under Repeated Execution")
+    st.markdown("###  Illustrative Outcome Under Repeated Execution")
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Cumulative Downside Exposure", f"{cumulative_downside}%")
@@ -1211,7 +1211,7 @@ def show_simulation():
     # -------------------------------
     # 2. Regime Sensitivity Matrix
     # -------------------------------
-    st.markdown("### 🌍 Regime Sensitivity Assessment ")
+    st.markdown("###  Regime Sensitivity Assessment ")
 
     regime_df = pd.DataFrame({
         "Market Regime": [
@@ -1235,7 +1235,7 @@ def show_simulation():
     # -------------------------------
     # 3. Path Comparison
     # -------------------------------
-    st.markdown("### 🛤️ Path Comparison")
+    st.markdown("###  Path Comparison")
 
     col1, col2 = st.columns(2)
 
@@ -1262,7 +1262,7 @@ def show_simulation():
     # -------------------------------
     # 4. Point of No Return
     # -------------------------------
-    st.markdown("### ⛔ Point of No Return")
+    st.markdown("###  Point of No Return")
 
     st.error(
         f"Beyond this point, portfolio recovery becomes predominantly dependent on "
@@ -1274,7 +1274,7 @@ def show_simulation():
     # -------------------------------
     # 5. Confidence Band
     # -------------------------------
-    st.markdown("### 📊 Simulation Confidence")
+    st.markdown("###  Simulation Confidence")
 
     st.info(
         "**Simulation Confidence: Medium**\n\n"
