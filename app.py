@@ -254,7 +254,7 @@ def show_login():
     
     st.markdown("""
     ### Why GLOQONT?
-    - 📊 **Portfolio-wide impact analysis** - Not just single stock moves
+    -  **Portfolio-wide impact analysis** - Not just single stock moves
     -  **Real-time consequence modeling** - Before you commit capital
     -  **Cross-asset correlation detection** - See hidden risks
     -  **Irreversibility warnings** - Know what can't be undone
